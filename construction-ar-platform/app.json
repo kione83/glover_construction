@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Construction AR Platform",
+    "slug": "construction-ar-platform",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light"
+  }
+}
+
