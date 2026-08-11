@@ -4,7 +4,22 @@
     "slug": "construction-ar-platform",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light"
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Construction AR Platform to use the camera for live project viewing."
+        }
+      ]
+    ],
+    "ios": {
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      },
+      "bundleIdentifier": "com.kione83.construction-ar-platform"
+    }
   }
 }
-
