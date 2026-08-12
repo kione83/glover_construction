@@ -30,3 +30,6 @@ project.xcworkspace
 
 # CocoaPods
 /Pods/
+construction-ar-platform/ios/Pods/
+construction-ar-platform/node_modules/
+construction-ar-platform/.expo/
