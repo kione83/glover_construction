@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import {
   MediaStream,
   RTCPeerConnection,
@@ -140,20 +150,30 @@ export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreen
   }
 
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={styles.screen}
+    >
       {streamUrl ? <RTCView streamURL={streamUrl} style={StyleSheet.absoluteFill} objectFit="cover" /> : <View style={styles.previewPlaceholder}><Text style={styles.previewText}>Camera preview starts when a laptop viewer joins.</Text></View>}
-      <View style={styles.panel}>
-        <Text style={styles.title}>Stream to laptop</Text>
-        <Text style={styles.copy}>{status}</Text>
-        <TextInput autoCapitalize="none" autoCorrect={false} value={serverUrl} onChangeText={setServerUrl} placeholder="ws://192.168.1.25:8080/signal" placeholderTextColor="#cfcfcf" style={styles.input} />
-        <TextInput autoCapitalize="none" autoCorrect={false} value={room} onChangeText={setRoom} placeholder="Room code" placeholderTextColor="#cfcfcf" style={styles.input} />
-        <View style={styles.actions}>
-          <Pressable style={styles.primaryButton} onPress={connect}><Text style={styles.primaryButtonText}>Connect phone</Text></Pressable>
-          <Pressable style={styles.secondaryButton} onPress={stopPublishing}><Text style={styles.secondaryButtonText}>Stop</Text></Pressable>
-          <Pressable style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Close</Text></Pressable>
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={styles.scrollContent}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.panel}>
+          <Text style={styles.title}>Stream to laptop</Text>
+          <Text style={styles.copy}>{status}</Text>
+          <TextInput autoCapitalize="none" autoCorrect={false} value={serverUrl} onChangeText={setServerUrl} placeholder="ws://192.168.1.25:8080/signal" placeholderTextColor="#cfcfcf" style={styles.input} />
+          <TextInput autoCapitalize="none" autoCorrect={false} value={room} onChangeText={setRoom} placeholder="Room code" placeholderTextColor="#cfcfcf" style={styles.input} />
+          <View style={styles.actions}>
+            <Pressable style={styles.primaryButton} onPress={connect}><Text style={styles.primaryButtonText}>Connect phone</Text></Pressable>
+            <Pressable style={styles.secondaryButton} onPress={stopPublishing}><Text style={styles.secondaryButtonText}>Stop</Text></Pressable>
+            <Pressable style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Close</Text></Pressable>
+          </View>
         </View>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -161,7 +181,8 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#101010", justifyContent: "flex-end" },
   previewPlaceholder: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", padding: 36 },
   previewText: { color: "#ddd", fontSize: 16, lineHeight: 24, textAlign: "center" },
-  panel: { margin: 20, padding: 18, gap: 12, borderRadius: 18, backgroundColor: "rgba(0, 0, 0, 0.72)" },
+  scrollContent: { flexGrow: 1, justifyContent: "flex-end", padding: 20 },
+  panel: { padding: 18, gap: 12, borderRadius: 18, backgroundColor: "rgba(0, 0, 0, 0.72)" },
   title: { color: "#fff", fontSize: 22, fontWeight: "800" },
   copy: { color: "#eee", fontSize: 14, lineHeight: 20 },
   input: { color: "#fff", backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.5)", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11 },

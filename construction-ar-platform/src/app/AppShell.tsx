@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { SafeAreaView, ScrollView, StyleSheet, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 
 import { LiveCameraScreen } from "../features/camera/LiveCameraScreen";
 import { LiveWebRtcPublisherScreen } from "../features/camera/LiveWebRtcPublisherScreen";
@@ -18,11 +25,21 @@ export function AppShell() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.canvas}>
-          <HomeScreen onOpenCamera={() => setActiveScreen("camera")} onOpenStream={() => setActiveScreen("stream")} />
-        </View>
-      </ScrollView>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.keyboardAvoidingView}
+      >
+        <ScrollView
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={styles.content}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.canvas}>
+            <HomeScreen onOpenCamera={() => setActiveScreen("camera")} onOpenStream={() => setActiveScreen("stream")} />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -32,8 +49,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   content: {
     flexGrow: 1,
+    paddingBottom: 24,
   },
   canvas: {
     flex: 1,
