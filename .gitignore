@@ -37,3 +37,5 @@ construction-ar-platform/.expo/
 construction-ar-platform/ios/Pods/
 construction-ar-platform/node_modules/
 construction-ar-platform/.expo/
+
+.DS_Store
