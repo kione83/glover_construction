@@ -19,7 +19,7 @@ Make sure all of the following are true:
 - The iPhone has trusted the developer profile in Settings.
 - The local repo path is:
 
-`/Users/s_marlow/Desktop/Glover_Construction/Repo_10Aug/glover_construction/construction-ar-platform`
+`/Glover_Construction/Repo_10Aug/glover_construction/construction-ar-platform`
 
 - The laptop's current local IP address is correct.
 
@@ -34,7 +34,7 @@ If the laptop IP changes later, replace that value everywhere below.
 In the VS Code terminal or Mac terminal:
 
 ```bash
-cd "/Users/s_marlow/Desktop/Glover_Construction/Repo_10Aug/glover_construction/construction-ar-platform"
+cd "/Glover_Construction/Repo_10Aug/glover_construction/construction-ar-platform"
 ```
 
 ## Step 2: Start Metro for the iPhone App
@@ -196,12 +196,3 @@ Do not use `ws://` in the browser address bar.
 - `8080` = browser viewer + signaling server
 - `http://` = browser viewer or app launcher
 - `ws://` = in-app signaling connection only
-
-## Suggested Next Update
-
-After the next milestone, update this file with:
-
-- any new launch commands
-- any changed port numbers
-- any revised room naming rules
-- any new iPhone install or trust steps
