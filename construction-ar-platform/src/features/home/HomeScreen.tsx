@@ -24,9 +24,10 @@ import { colors } from "../../theme/colors";
 interface HomeScreenProps {
   onOpenCamera: () => void;
   onOpenStream: () => void;
+  onOpenMeasure: () => void;
 }
 
-export function HomeScreen({ onOpenCamera, onOpenStream }: HomeScreenProps) {
+export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure }: HomeScreenProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [isLoading, setIsLoading] = useState(true);
@@ -54,12 +55,29 @@ export function HomeScreen({ onOpenCamera, onOpenStream }: HomeScreenProps) {
 
   async function persist(nextProjects: Project[]) {
     setProjects(nextProjects);
+    const existingDocuments = await loadProjectDocuments();
+
     await saveProjectDocuments(
-      nextProjects.map((project) => ({
-        kind: "construction-ar-project" as const,
-        schemaVersion: 1 as const,
-        project,
-      })),
+      nextProjects.map((project) => {
+        const existingDocument = existingDocuments.find(
+          (document) => document.project.id === project.id,
+        );
+
+        if (existingDocument) {
+          return {
+            ...existingDocument,
+            project,
+          };
+        }
+
+        return {
+          ...createEmptyProjectDocument({
+            id: project.id,
+            name: project.name,
+          }),
+          project,
+        };
+      }),
     );
   }
 
@@ -88,15 +106,8 @@ export function HomeScreen({ onOpenCamera, onOpenStream }: HomeScreenProps) {
   async function updateSelectedProject(update: (project: Project) => Project) {
     if (!selectedProject) return;
     const updatedProject = update(selectedProject);
-    const currentDocuments = projects.map((project) => ({
-      kind: "construction-ar-project" as const,
-      schemaVersion: 1 as const,
-      project,
-    }));
     await persist(
-      replaceProject(currentDocuments, updatedProject).map(
-        (document) => document.project,
-      ),
+      projects.map((project) => (project.id === updatedProject.id ? updatedProject : project)),
     );
   }
 
@@ -236,23 +247,24 @@ export function HomeScreen({ onOpenCamera, onOpenStream }: HomeScreenProps) {
         </View>
       </View>
 
-      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={onOpenCamera} onOpenStream={onOpenStream} />}
+      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={onOpenCamera} onOpenStream={onOpenStream} onOpenMeasure={onOpenMeasure} />}
     </View>
   );
 }
 
-function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, selectedCatalogObjectId, onSelectCatalogObject, onPlaceObject, onRunValidation, onOpenCamera, onOpenStream }: { project: Project; roomName: string; onRoomNameChange: (value: string) => void; onAddRoom: () => void; selectedCatalogObjectId?: string; onSelectCatalogObject: (id: string) => void; onPlaceObject: (item: CatalogObject) => void; onRunValidation: () => void; onOpenCamera: () => void; onOpenStream: () => void }) {
+function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, selectedCatalogObjectId, onSelectCatalogObject, onPlaceObject, onRunValidation, onOpenCamera, onOpenStream, onOpenMeasure }: any) {
   const selectedCatalogObject = starterCatalog.find((item) => item.id === selectedCatalogObjectId);
   return <View style={styles.panel}>
     <Text style={styles.panelTitle}>{project.name}</Text>
     <View style={styles.metrics}><Metric label="Rooms" value={project.summary.roomCount} /><Metric label="Placed" value={project.summary.placedObjectCount} /><Metric label="Issues" value={project.summary.validationIssueCount} /></View>
     <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>Live device view</Text><Text style={styles.moduleDescription}>Open the iPhone’s rear camera inside this project workspace.</Text></View><Button label="Open camera" onPress={onOpenCamera} /></View>
-    <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>Laptop live view</Text><Text style={styles.moduleDescription}>Publish the rear camera to the local WebRTC viewer.</Text></View><Button label="Stream to laptop" onPress={onOpenStream} /></View>
+      <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>Laptop live view</Text><Text style={styles.moduleDescription}>Publish the rear camera to the local WebRTC viewer.</Text></View><Button label="Stream to laptop" onPress={onOpenStream} /></View>
+      <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>AR measurement</Text><Text style={styles.moduleDescription}>Capture two anchored spatial points, calculate distance, and surface confidence without overstating certainty.</Text></View><Button label="Measure distance" onPress={onOpenMeasure} /></View>
     <View style={styles.form}><Text style={styles.sectionLabel}>Manual room</Text><Field label="Room name" value={roomName} onChangeText={onRoomNameChange} /><Button label="Add room" onPress={onAddRoom} /></View>
     <Text style={styles.sectionLabel}>Catalog</Text>
-    <View style={styles.catalogList}>{starterCatalog.map((item) => <Pressable key={item.id} onPress={() => onSelectCatalogObject(item.id)} style={[styles.catalogItem, item.id === selectedCatalogObjectId && styles.selectedCard]}><Text style={styles.moduleName}>{item.name}</Text><Text style={styles.moduleDescription}>{item.category} · {item.placementMode}</Text></Pressable>)}</View>
+    <View style={styles.catalogList}>{starterCatalog.map((item: any) => <Pressable key={item.id} onPress={() => onSelectCatalogObject(item.id)} style={[styles.catalogItem, item.id === selectedCatalogObjectId && styles.selectedCard]}><Text style={styles.moduleName}>{item.name}</Text><Text style={styles.moduleDescription}>{item.category} · {item.placementMode}</Text></Pressable>)}</View>
     {selectedCatalogObject && <Button label={`Place ${selectedCatalogObject.name}`} onPress={() => onPlaceObject(selectedCatalogObject)} />}
-    {project.placedObjects.length > 0 && <><Text style={styles.sectionLabel}>Current layout</Text>{project.placedObjects.filter((item) => item.status === "active").map((item) => <Text key={item.id} style={styles.layoutItem}>{item.displayName}</Text>)}</>}
+    {project.placedObjects.length > 0 && <><Text style={styles.sectionLabel}>Current layout</Text>{project.placedObjects.filter((item: any) => item.status === "active").map((item: any) => <Text key={item.id} style={styles.layoutItem}>{item.displayName}</Text>)}</>}
     <View style={styles.validationHeader}><Text style={styles.sectionLabel}>Validation</Text><Button label="Run validation" onPress={onRunValidation} /></View>
     <ValidationResults project={project} />
   </View>;
@@ -261,9 +273,9 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, sele
 function ValidationResults({ project }: { project: Project }) {
   if (!project.summary.lastValidatedAt) return <Text style={styles.empty}>Run validation to review this layout.</Text>;
   if (project.validationIssues.length === 0) return <Text style={styles.success}>No validation issues found.</Text>;
-  const errors = project.validationIssues.filter((item) => item.severity === "error");
-  const warnings = project.validationIssues.filter((item) => item.severity === "warning");
-  return <View style={styles.issueList}>{errors.length > 0 && <Text style={styles.errorLabel}>Errors ({errors.length})</Text>}{warnings.length > 0 && <Text style={styles.warningLabel}>Warnings ({warnings.length})</Text>}{project.validationIssues.map((item) => <View key={item.id} style={styles.issue}><Text style={item.severity === "error" ? styles.errorLabel : styles.warningLabel}>{item.severity.toUpperCase()} · {defaultValidationRules.find((rule) => rule.id === item.ruleId)?.name ?? item.ruleId}</Text><Text style={styles.moduleDescription}>{item.message}</Text></View>)}</View>;
+  const errors = project.validationIssues.filter((item: any) => item.severity === "error");
+  const warnings = project.validationIssues.filter((item: any) => item.severity === "warning");
+  return <View style={styles.issueList}>{errors.length > 0 && <Text style={styles.errorLabel}>Errors ({errors.length})</Text>}{warnings.length > 0 && <Text style={styles.warningLabel}>Warnings ({warnings.length})</Text>}{project.validationIssues.map((item: any) => <View key={item.id} style={styles.issue}><Text style={item.severity === "error" ? styles.errorLabel : styles.warningLabel}>{item.severity.toUpperCase()} · {defaultValidationRules.find((rule) => rule.id === item.ruleId)?.name ?? item.ruleId}</Text><Text style={styles.moduleDescription}>{item.message}</Text></View>)}</View>;
 }
 
 function Field({ label, value, onChangeText }: { label: string; value: string; onChangeText: (value: string) => void }) { return <View style={styles.field}><Text style={styles.fieldLabel}>{label}</Text><TextInput value={value} onChangeText={onChangeText} placeholder={label} placeholderTextColor={colors.muted} style={styles.input} /></View>; }
