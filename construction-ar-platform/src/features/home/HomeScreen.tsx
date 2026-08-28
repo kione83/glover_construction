@@ -24,7 +24,7 @@ import { colors } from "../../theme/colors";
 interface HomeScreenProps {
   onOpenCamera: () => void;
   onOpenStream: () => void;
-  onOpenMeasure: () => void;
+  onOpenMeasure: (catalogObjectId?: string) => void;
 }
 
 export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure }: HomeScreenProps) {
@@ -259,11 +259,11 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, sele
     <View style={styles.metrics}><Metric label="Rooms" value={project.summary.roomCount} /><Metric label="Placed" value={project.summary.placedObjectCount} /><Metric label="Issues" value={project.summary.validationIssueCount} /></View>
     <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>Live device view</Text><Text style={styles.moduleDescription}>Open the iPhone’s rear camera inside this project workspace.</Text></View><Button label="Open camera" onPress={onOpenCamera} /></View>
       <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>Laptop live view</Text><Text style={styles.moduleDescription}>Publish the rear camera to the local WebRTC viewer.</Text></View><Button label="Stream to laptop" onPress={onOpenStream} /></View>
-      <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>AR measurement</Text><Text style={styles.moduleDescription}>Capture two anchored spatial points, calculate distance, and surface confidence without overstating certainty.</Text></View><Button label="Measure distance" onPress={onOpenMeasure} /></View>
+      <View style={styles.liveViewCallout}><View style={styles.liveViewCopy}><Text style={styles.sectionLabel}>AR measure + place</Text><Text style={styles.moduleDescription}>Measure, place scaled catalog items, and keep the laptop stream available in one field workflow.</Text></View><Button label="Open AR tools" onPress={onOpenMeasure} /></View>
     <View style={styles.form}><Text style={styles.sectionLabel}>Manual room</Text><Field label="Room name" value={roomName} onChangeText={onRoomNameChange} /><Button label="Add room" onPress={onAddRoom} /></View>
     <Text style={styles.sectionLabel}>Catalog</Text>
     <View style={styles.catalogList}>{starterCatalog.map((item: any) => <Pressable key={item.id} onPress={() => onSelectCatalogObject(item.id)} style={[styles.catalogItem, item.id === selectedCatalogObjectId && styles.selectedCard]}><Text style={styles.moduleName}>{item.name}</Text><Text style={styles.moduleDescription}>{item.category} · {item.placementMode}</Text></Pressable>)}</View>
-    {selectedCatalogObject && <Button label={`Place ${selectedCatalogObject.name}`} onPress={() => onPlaceObject(selectedCatalogObject)} />}
+    {selectedCatalogObject && <Button label={`Open AR placement for ${selectedCatalogObject.name}`} onPress={() => onOpenMeasure(selectedCatalogObject.id)} />}
     {project.placedObjects.length > 0 && <><Text style={styles.sectionLabel}>Current layout</Text>{project.placedObjects.filter((item: any) => item.status === "active").map((item: any) => <Text key={item.id} style={styles.layoutItem}>{item.displayName}</Text>)}</>}
     <View style={styles.validationHeader}><Text style={styles.sectionLabel}>Validation</Text><Button label="Run validation" onPress={onRunValidation} /></View>
     <ValidationResults project={project} />

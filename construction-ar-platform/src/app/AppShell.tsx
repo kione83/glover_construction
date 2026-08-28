@@ -15,6 +15,7 @@ import { MeasurementScreen } from "../features/measurement/MeasurementScreen";
 
 export function AppShell() {
   const [activeScreen, setActiveScreen] = useState<"workspace" | "camera" | "stream" | "measure">("workspace");
+  const [initialPlacementCatalogObjectId, setInitialPlacementCatalogObjectId] = useState<string>();
 
   if (activeScreen === "camera") {
     return <LiveCameraScreen onClose={() => setActiveScreen("workspace")} />;
@@ -25,7 +26,12 @@ export function AppShell() {
   }
 
   if (activeScreen === "measure") {
-    return <MeasurementScreen onClose={() => setActiveScreen("workspace")} />;
+    return (
+      <MeasurementScreen
+        initialCatalogObjectId={initialPlacementCatalogObjectId}
+        onClose={() => setActiveScreen("workspace")}
+      />
+    );
   }
 
   return (
@@ -44,7 +50,10 @@ export function AppShell() {
             <HomeScreen
               onOpenCamera={() => setActiveScreen("camera")}
               onOpenStream={() => setActiveScreen("stream")}
-              onOpenMeasure={() => setActiveScreen("measure")}
+              onOpenMeasure={(catalogObjectId) => {
+                setInitialPlacementCatalogObjectId(catalogObjectId);
+                setActiveScreen("measure");
+              }}
             />
           </View>
         </ScrollView>

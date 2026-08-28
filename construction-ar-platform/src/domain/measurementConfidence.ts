@@ -14,6 +14,7 @@ function scoreTrackingQuality(quality: MeasurementTrackingQuality): number {
 }
 
 function scoreEndpoint(endpoint: ResolvedMeasurementEndpoint): number {
+  if (endpoint.source === "scene-depth") return 1;
   if (endpoint.source === "existing-plane-geometry") return 1;
   if (endpoint.source === "existing-plane-infinite") return 0.8;
   if (endpoint.source === "estimated-plane") return 0.55;

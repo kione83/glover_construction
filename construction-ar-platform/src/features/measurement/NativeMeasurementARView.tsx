@@ -3,6 +3,7 @@ import type { NativeSyntheticEvent, StyleProp, ViewStyle } from "react-native";
 import { Platform, UIManager, View, requireNativeComponent } from "react-native";
 
 export type NativeMeasurementPointSource =
+  | "scene-depth"
   | "existing-plane-geometry"
   | "existing-plane-infinite"
   | "estimated-plane"
@@ -29,6 +30,11 @@ export interface NativeMeasurementResolutionDiagnostics {
   acceptedSampleCount?: number;
   rejectedSampleCount?: number;
   maximumDeviationMeters?: number;
+  medianDeviationMeters?: number;
+  highConfidenceDepthSampleCount?: number;
+  sampleWindowSeconds?: number;
+  depthConfidence?: number;
+  depthMeters?: number;
   sourceCounts?: Partial<Record<NativeMeasurementPointSource, number>>;
   reticleState?: NativeMeasurementReticleState;
 }
@@ -67,7 +73,11 @@ export interface NativeMeasurementAction {
     | "tracking-updated"
     | "point-set"
     | "measurement-cleared"
-    | "capture-failed";
+    | "capture-failed"
+    | "object-placed"
+    | "object-updated"
+    | "object-removed"
+    | "placement-failed";
   pointRole?: "start" | "end";
   message: string;
 }
@@ -76,7 +86,45 @@ export interface NativeMeasurementUpdatePayload {
   measurement?: NativeMeasurementSnapshot;
   reticle?: NativeMeasurementReticleSnapshot;
   tracking?: NativeMeasurementTrackingSnapshot;
+  placement?: NativePlacementEvent;
   lastAction: NativeMeasurementAction;
+}
+
+export interface NativePlacementDimensions {
+  width: number;
+  height: number;
+  depth: number;
+}
+
+export interface NativePlacementRequest {
+  requestId: number;
+  catalogObjectId: string;
+  displayName: string;
+  placementMode: string;
+  dimensions: NativePlacementDimensions;
+}
+
+export interface NativePlacedObjectSnapshot {
+  id: string;
+  catalogObjectId: string;
+  displayName: string;
+  placementMode: string;
+  dimensions: NativePlacementDimensions;
+  position: NativeMeasurementPoint;
+  rotationY: number;
+}
+
+export interface NativePlacementEditRequest {
+  requestId: number;
+  objectId: string;
+  action: "rotate-left" | "rotate-right" | "remove";
+}
+
+export interface NativePlacementEvent {
+  kind: "object-placed" | "object-updated" | "object-removed" | "placement-failed";
+  message: string;
+  object?: NativePlacedObjectSnapshot;
+  objectId?: string;
 }
 
 interface NativeMeasurementARViewProps {
@@ -84,6 +132,10 @@ interface NativeMeasurementARViewProps {
   resetCounter: number;
   captureRequestId: number;
   capturePointRole: "start" | "end";
+  placementRequest?: NativePlacementRequest | null;
+  placedObjects?: NativePlacedObjectSnapshot[];
+  selectedPlacedObjectId?: string;
+  placementEditRequest?: NativePlacementEditRequest | null;
   onMeasurementUpdate?: (event: NativeSyntheticEvent<NativeMeasurementUpdatePayload>) => void;
 }
 

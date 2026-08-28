@@ -15,6 +15,7 @@ export type MeasurementObservationStatus = "accepted" | "rejected";
 export type MeasurementObservationKind = "single" | "sample-burst" | "repeat-pass";
 export type MeasurementTrackingQuality = "normal" | "limited" | "not-available";
 export type MeasurementPointSource =
+  | "scene-depth"
   | "existing-plane-geometry"
   | "existing-plane-infinite"
   | "estimated-plane"
@@ -42,6 +43,11 @@ export interface MeasurementEndpointResolutionDiagnostics {
   acceptedSampleCount?: number;
   rejectedSampleCount?: number;
   maximumDeviationMeters?: number;
+  medianDeviationMeters?: number;
+  highConfidenceDepthSampleCount?: number;
+  sampleWindowSeconds?: number;
+  depthConfidence?: number;
+  depthMeters?: number;
   sourceCounts?: Partial<Record<MeasurementPointSource, number>>;
   reticleState?: MeasurementReticleState;
 }

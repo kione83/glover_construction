@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   Alert,
   Platform,
@@ -18,12 +19,19 @@ import {
   createMeasurementObservation,
   createMultiCaptureMeasurementLogEntry,
   createSingleMeasurementLogEntry,
+  buildMeasurementCsv,
+  buildMeasurementCsvFilename,
+  starterCatalog,
+  validateProject,
+  measurementCsvRowCount,
   deleteMeasurementLogEntry,
   formatDecimalInches,
+  type CatalogObject,
   type Measurement,
   type MeasurementLogEntry,
   type MeasurementMode,
   type MeasurementTrackingSnapshot,
+  type PlacedObject,
   type Project,
   type ResolvedMeasurementEndpoint,
 } from "../../domain";
@@ -42,9 +50,14 @@ import {
   type NativeMeasurementSnapshot,
   type NativeMeasurementTrackingSnapshot,
   type NativeMeasurementUpdatePayload,
+  type NativePlacedObjectSnapshot,
+  type NativePlacementEditRequest,
+  type NativePlacementRequest,
 } from "./NativeMeasurementARView";
+import { LiveStreamPanel } from "../camera/LiveStreamPanel";
 
 interface MeasurementScreenProps {
+  initialCatalogObjectId?: string;
   onClose: () => void;
 }
 
@@ -71,7 +84,12 @@ function makeId(prefix: string): string {
 function mapTrackingSnapshot(
   tracking: NativeMeasurementTrackingSnapshot | undefined,
 ): MeasurementTrackingSnapshot {
-  if (!tracking) {
+  if (
+    !tracking ||
+    (tracking.quality !== "normal" &&
+      tracking.quality !== "limited" &&
+      tracking.quality !== "not-available")
+  ) {
     return DEFAULT_TRACKING;
   }
 
@@ -93,7 +111,7 @@ function normalizeReticleSnapshot(
   return {
     state: reticle.state,
     message: reticle.message,
-    tracking: reticle.tracking ?? fallback.tracking,
+    tracking: mapTrackingSnapshot(reticle.tracking ?? fallback.tracking),
     point: reticle.point,
     source: reticle.source,
     planeAlignment: reticle.planeAlignment,
@@ -113,6 +131,101 @@ function mapResolvedEndpoint(
     tracking: mapTrackingSnapshot(resolution.tracking),
     capturedAt: resolution.capturedAt,
     resolutionDiagnostics: resolution.resolutionDiagnostics,
+  };
+}
+
+function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject): NativePlacedObjectSnapshot {
+  const catalogObject = starterCatalog.find((item) => item.id === placedObject.catalogObjectId);
+
+  return {
+    id: placedObject.id,
+    catalogObjectId: placedObject.catalogObjectId,
+    displayName: placedObject.displayName,
+    placementMode: catalogObject?.placementMode ?? "floor-standing",
+    dimensions: {
+      width: placedObject.dimensions.width,
+      height: placedObject.dimensions.height,
+      depth: placedObject.dimensions.depth,
+    },
+    position: placedObject.transform.position,
+    rotationY: placedObject.transform.rotation.yaw,
+  };
+}
+
+function mapNativeSnapshotToPlacedObject(
+  snapshot: NativePlacedObjectSnapshot,
+  roomCaptureId: string,
+  existingObject?: PlacedObject,
+): PlacedObject {
+  const timestamp = new Date().toISOString();
+
+  return {
+    id: snapshot.id,
+    catalogObjectId: snapshot.catalogObjectId,
+    roomCaptureId,
+    anchorId: existingObject?.anchorId ?? `${snapshot.id}-anchor`,
+    displayName: snapshot.displayName,
+    transform: {
+      position: snapshot.position,
+      rotation: { pitch: 0, yaw: snapshot.rotationY, roll: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+    dimensions: {
+      width: snapshot.dimensions.width,
+      height: snapshot.dimensions.height,
+      depth: snapshot.dimensions.depth,
+      unit: "m",
+    },
+    status: "active",
+    placedAt: existingObject?.placedAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function createPlacementRequest(
+  requestId: number,
+  catalogObject: CatalogObject,
+): NativePlacementRequest {
+  return {
+    requestId,
+    catalogObjectId: catalogObject.id,
+    displayName: catalogObject.name,
+    placementMode: catalogObject.placementMode,
+    dimensions: {
+      width: catalogObject.defaultDimensions.width,
+      height: catalogObject.defaultDimensions.height,
+      depth: catalogObject.defaultDimensions.depth,
+    },
+  };
+}
+
+function createDefaultRoomCapture(projectId: string): Project["roomCaptures"][number] {
+  const timestamp = new Date().toISOString();
+
+  return {
+    id: `room-${projectId}-${Date.now()}`,
+    name: "Room 1",
+    status: "in-progress",
+    source: "manual",
+    unit: "m",
+    bounds: {
+      center: { x: 0, y: 1.2, z: 0 },
+      size: {
+        width: 3,
+        height: 2.4,
+        depth: 3,
+        unit: "m",
+      },
+    },
+    measuredDimensions: {
+      width: 3,
+      height: 2.4,
+      depth: 3,
+      unit: "m",
+    },
+    surfaces: [],
+    notes: "Auto-created for AR placement.",
+    capturedAt: timestamp,
   };
 }
 
@@ -225,7 +338,7 @@ function MeasurementSummaryCard({
   );
 }
 
-export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
+export function MeasurementScreen({ initialCatalogObjectId, onClose }: MeasurementScreenProps) {
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
@@ -233,6 +346,15 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
   const [screenView, setScreenView] = useState<ScreenView>("measure");
   const [selectedLogEntryId, setSelectedLogEntryId] = useState<string>();
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("single");
+  const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState<string | undefined>(
+    initialCatalogObjectId ?? starterCatalog[0]?.id,
+  );
+  const [selectedPlacedObjectId, setSelectedPlacedObjectId] = useState<string>();
+  const [placementRequest, setPlacementRequest] = useState<NativePlacementRequest | null>(null);
+  const [placementEditRequest, setPlacementEditRequest] =
+    useState<NativePlacementEditRequest | null>(null);
+  const [isOverflowMenuOpen, setIsOverflowMenuOpen] = useState(false);
+  const placementRoomIdRef = useRef<string | undefined>(undefined);
   const [nativeSnapshot, setNativeSnapshot] = useState<NativeMeasurementSnapshot>();
   const [tracking, setTracking] = useState<MeasurementTrackingSnapshot>(DEFAULT_TRACKING);
   const [reticle, setReticle] = useState<NativeMeasurementReticleSnapshot>(DEFAULT_RETICLE);
@@ -265,6 +387,18 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (initialCatalogObjectId) {
+      setSelectedCatalogObjectId(initialCatalogObjectId);
+    }
+  }, [initialCatalogObjectId]);
+
+  useEffect(() => {
+    if (selectedRoomId) {
+      placementRoomIdRef.current = selectedRoomId;
+    }
+  }, [selectedRoomId]);
+
   const selectedProjectDocument = useMemo(
     () => projectDocuments.find((document) => document.project.id === selectedProjectId),
     [projectDocuments, selectedProjectId],
@@ -290,6 +424,24 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
   const selectedRoom = useMemo(
     () => selectedProject?.roomCaptures.find((room) => room.id === selectedRoomId),
     [selectedProject, selectedRoomId],
+  );
+
+  const selectedCatalogObject = useMemo(
+    () => starterCatalog.find((item) => item.id === selectedCatalogObjectId) ?? starterCatalog[0],
+    [selectedCatalogObjectId],
+  );
+
+  const activeRoomPlacedObjects = useMemo(
+    () =>
+      selectedProject?.placedObjects.filter(
+        (object) => object.roomCaptureId === selectedRoomId && object.status === "active",
+      ) ?? [],
+    [selectedProject, selectedRoomId],
+  );
+
+  const nativePlacedObjects = useMemo(
+    () => activeRoomPlacedObjects.map(mapPlacedObjectToNativeSnapshot),
+    [activeRoomPlacedObjects],
   );
 
   const activeRoomMeasurementLogEntries = useMemo(() => {
@@ -339,6 +491,9 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
     !!selectedProject &&
     !!selectedRoom &&
     !(measurementMode === "multi-capture" && !!nativeSnapshot?.endPoint);
+  const exportableMeasurementCount = selectedRoomId !== undefined
+    ? activeRoomMeasurementLogEntries.length
+    : selectedProjectDocument?.measurementLogEntries.length ?? 0;
 
   const nextCaptureRole: "start" | "end" = nativeSnapshot?.startPoint ? "end" : "start";
 
@@ -370,6 +525,111 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
   function clearMultiCaptureSession(message: string) {
     setMultiCapturePasses([]);
     clearLiveMeasurementState(message);
+  }
+
+  function persistPlacementSnapshot(snapshot: NativePlacedObjectSnapshot) {
+    const placementRoomId = selectedRoomId ?? placementRoomIdRef.current;
+
+    if (!placementRoomId) {
+      return;
+    }
+
+    void updateSelectedProjectDocument((document) => {
+      const existingObject = document.project.placedObjects.find((object) => object.id === snapshot.id);
+      const placedObject = mapNativeSnapshotToPlacedObject(snapshot, placementRoomId, existingObject);
+      const nextPlacedObjects = existingObject
+        ? document.project.placedObjects.map((object) =>
+            object.id === placedObject.id ? placedObject : object,
+          )
+        : [...document.project.placedObjects, placedObject];
+      const updatedProject: Project = {
+        ...document.project,
+        status: "layout-in-progress",
+        placedObjects: nextPlacedObjects,
+      };
+
+      return {
+        ...document,
+        project: {
+          ...updatedProject,
+          validationIssues: validateProject(updatedProject, placedObject.updatedAt),
+        },
+      };
+    });
+
+    setSelectedPlacedObjectId(snapshot.id);
+  }
+
+  function removePlacementObject(objectId: string) {
+    void updateSelectedProjectDocument((document) => {
+      const timestamp = new Date().toISOString();
+      const updatedProject: Project = {
+        ...document.project,
+        placedObjects: document.project.placedObjects.filter((object) => object.id !== objectId),
+      };
+
+      return {
+        ...document,
+        project: {
+          ...updatedProject,
+          validationIssues: validateProject(updatedProject, timestamp),
+        },
+      };
+    });
+
+    setSelectedPlacedObjectId((current) => (current === objectId ? undefined : current));
+  }
+
+  function handlePlacementUpdate(payload: NativeMeasurementUpdatePayload) {
+    if (!payload.placement) {
+      return;
+    }
+
+    setStatus(payload.placement.message);
+
+    if (payload.placement.object) {
+      persistPlacementSnapshot(payload.placement.object);
+    }
+
+    if (payload.placement.kind === "object-removed" && payload.placement.objectId) {
+      removePlacementObject(payload.placement.objectId);
+    }
+  }
+
+  function requestCatalogPlacement() {
+    if (!selectedCatalogObject) {
+      return;
+    }
+
+    if (!selectedRoomId && selectedProjectDocument) {
+      const defaultRoom = createDefaultRoomCapture(selectedProjectDocument.project.id);
+      placementRoomIdRef.current = defaultRoom.id;
+      setSelectedRoomId(defaultRoom.id);
+      void updateSelectedProjectDocument((document) => ({
+        ...document,
+        project: {
+          ...document.project,
+          status: "scanned",
+          roomCaptures: [...document.project.roomCaptures, defaultRoom],
+        },
+      }));
+    } else if (selectedRoomId) {
+      placementRoomIdRef.current = selectedRoomId;
+    }
+
+    setPlacementRequest(createPlacementRequest(Date.now(), selectedCatalogObject));
+  }
+
+  function requestPlacementEdit(action: NativePlacementEditRequest["action"]) {
+    if (!selectedPlacedObjectId) {
+      return;
+    }
+
+    setPlacementEditRequest({
+      requestId: Date.now(),
+      objectId: selectedPlacedObjectId,
+      action,
+    });
   }
 
   function handleChangeMeasurementMode(nextMode: MeasurementMode) {
@@ -479,17 +739,28 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
   }
 
   function handleMeasurementUpdate(payload: NativeMeasurementUpdatePayload) {
+    handlePlacementUpdate(payload);
+    if (payload.placement) {
+      return;
+    }
+    const action: NativeMeasurementAction = payload.lastAction ?? {
+      kind: "tracking-updated",
+      message: payload.reticle?.message ?? "Tracking updated.",
+    };
+    const normalizedReticle = normalizeReticleSnapshot(payload.reticle, reticle);
+    const measurementSnapshot = payload.measurement;
+
     setTracking(mapTrackingSnapshot(payload.tracking));
-    setReticle((current) => normalizeReticleSnapshot(payload.reticle, current));
-    setNativeSnapshot(payload.measurement);
+    setReticle(normalizedReticle);
+    setNativeSnapshot(measurementSnapshot);
 
     if (
-      payload.lastAction.kind === "point-set" &&
-      payload.lastAction.pointRole === "end" &&
-      payload.measurement?.startPoint &&
-      payload.measurement.endPoint
+      action.kind === "point-set" &&
+      action.pointRole === "end" &&
+      measurementSnapshot?.startPoint &&
+      measurementSnapshot.endPoint
     ) {
-      const measurement = createMeasurementFromNativeSnapshot(payload.measurement, measurementMode);
+      const measurement = createMeasurementFromNativeSnapshot(measurementSnapshot, measurementMode);
 
       if (measurement) {
         if (measurementMode === "single") {
@@ -501,18 +772,18 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
       }
     }
 
-    if (payload.lastAction.kind === "point-set" && payload.lastAction.pointRole === "start") {
+    if (action.kind === "point-set" && action.pointRole === "start") {
       setCapturePointRole("end");
     }
 
-    if (payload.lastAction.kind === "measurement-cleared") {
+    if (action.kind === "measurement-cleared") {
       setNativeSnapshot(undefined);
       setCapturePointRole("start");
     }
 
     setStatus(
       measurementStatusCopy(
-        payload.lastAction,
+        action,
         latestSingleMeasurement,
         multiCapturePasses.length,
         measurementMode,
@@ -651,6 +922,59 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
     });
   }
 
+  async function handleExportCsv() {
+    if (!selectedProjectDocument || !selectedProject) {
+      Alert.alert("No project selected", "Select a project before exporting measurements.");
+      return;
+    }
+
+    const entries =
+      selectedRoomId !== undefined
+        ? activeRoomMeasurementLogEntries
+        : selectedProjectDocument.measurementLogEntries;
+    const rowCount = measurementCsvRowCount(entries);
+
+    if (rowCount === 0) {
+      Alert.alert("No measurements", "No measurements available to export.");
+      return;
+    }
+
+    const exportedAt = new Date();
+    const csv = buildMeasurementCsv(entries, {
+      project: selectedProject,
+      room: selectedRoom,
+      exportedAt,
+    });
+
+    if (!csv) {
+      Alert.alert("No measurements", "No measurements available to export.");
+      return;
+    }
+
+    const exportDirectory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+    if (!exportDirectory) {
+      Alert.alert("Export unavailable", "No local file location is available for CSV export.");
+      return;
+    }
+
+    const filename = buildMeasurementCsvFilename({
+      project: selectedProject,
+      room: selectedRoom,
+      exportedAt,
+    });
+    const fileUri = `${exportDirectory}${filename}`;
+
+    await FileSystem.writeAsStringAsync(fileUri, csv, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+
+    await Share.share({
+      url: fileUri,
+      title: filename,
+      message: filename,
+    });
+  }
+
   const renderMeasureView = () => (
     <View style={styles.measureContainer}>
       <View style={styles.arContainer}>
@@ -658,7 +982,11 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
           capturePointRole={capturePointRole}
           captureRequestId={captureRequestId}
           onMeasurementUpdate={(event) => handleMeasurementUpdate(event.nativeEvent)}
+          placedObjects={nativePlacedObjects}
+          placementEditRequest={placementEditRequest}
+          placementRequest={placementRequest}
           resetCounter={resetCounter}
+          selectedPlacedObjectId={selectedPlacedObjectId}
           style={styles.arView}
         />
 
@@ -693,6 +1021,94 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
       </View>
 
       <View style={styles.bottomPanel}>
+        <View style={styles.placementPanel}>
+          <Text style={styles.sectionLabel}>AR placement</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+          >
+            {starterCatalog.map((item) => (
+              <SelectionChip
+                key={item.id}
+                label={item.name}
+                onPress={() => setSelectedCatalogObjectId(item.id)}
+                selected={item.id === selectedCatalogObject?.id}
+              />
+            ))}
+          </ScrollView>
+
+          <Pressable
+            disabled={!selectedCatalogObject || !selectedRoomId}
+            onPress={requestCatalogPlacement}
+            style={[
+              styles.primaryButton,
+              (!selectedCatalogObject || !selectedRoomId) && styles.buttonDisabled,
+            ]}
+          >
+            <Text style={styles.primaryButtonText}>
+              Place {selectedCatalogObject?.name ?? "object"}
+            </Text>
+          </Pressable>
+
+          {activeRoomPlacedObjects.length > 0 && (
+            <>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+              >
+                {activeRoomPlacedObjects.map((object) => (
+                  <SelectionChip
+                    key={object.id}
+                    label={object.displayName}
+                    onPress={() => setSelectedPlacedObjectId(object.id)}
+                    selected={object.id === selectedPlacedObjectId}
+                  />
+                ))}
+              </ScrollView>
+
+              <View style={styles.placementActions}>
+                <Pressable
+                  disabled={!selectedPlacedObjectId}
+                  onPress={() => requestPlacementEdit("rotate-left")}
+                  style={[
+                    styles.secondaryButton,
+                    !selectedPlacedObjectId && styles.buttonDisabledSecondary,
+                  ]}
+                >
+                  <Text style={styles.secondaryButtonText}>Rotate left</Text>
+                </Pressable>
+                <Pressable
+                  disabled={!selectedPlacedObjectId}
+                  onPress={() => requestPlacementEdit("rotate-right")}
+                  style={[
+                    styles.secondaryButton,
+                    !selectedPlacedObjectId && styles.buttonDisabledSecondary,
+                  ]}
+                >
+                  <Text style={styles.secondaryButtonText}>Rotate right</Text>
+                </Pressable>
+                <Pressable
+                  disabled={!selectedPlacedObjectId}
+                  onPress={() => requestPlacementEdit("remove")}
+                  style={[
+                    styles.dangerButton,
+                    !selectedPlacedObjectId && styles.buttonDisabledSecondary,
+                  ]}
+                >
+                  <Text style={styles.dangerButtonText}>Remove</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+
+        <LiveStreamPanel
+          compact
+          disabledReason="AR placement is using the phone camera. Close measurement/placement before starting the standalone customer stream."
+        />
+
         <Text style={styles.statusText}>{status}</Text>
 
         <View style={styles.selectionSection}>
@@ -762,11 +1178,21 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
             title="Single Measure"
             extra={
               <>
-                <Text style={styles.cardCopy}>
-                  Endpoint sources: {latestSingleMeasurement.startPoint.source} ·{" "}
-                  {latestSingleMeasurement.endPoint.source}
-                </Text>
-                <Pressable
+              <Text style={styles.cardCopy}>
+                Endpoint sources: {latestSingleMeasurement.startPoint.source} ·{" "}
+                {latestSingleMeasurement.endPoint.source}
+              </Text>
+              <Text style={styles.cardCopy}>
+                Point A samples:{" "}
+                {latestSingleMeasurement.startPoint.resolutionDiagnostics?.acceptedSampleCount ?? "n/a"} accepted /{" "}
+                {latestSingleMeasurement.startPoint.resolutionDiagnostics?.rejectedSampleCount ?? "n/a"} rejected
+              </Text>
+              <Text style={styles.cardCopy}>
+                Point B samples:{" "}
+                {latestSingleMeasurement.endPoint.resolutionDiagnostics?.acceptedSampleCount ?? "n/a"} accepted /{" "}
+                {latestSingleMeasurement.endPoint.resolutionDiagnostics?.rejectedSampleCount ?? "n/a"} rejected
+              </Text>
+              <Pressable
                   onPress={() =>
                     clearLiveMeasurementState(
                       "Measurement cleared. Aim at Point A to begin another measurement.",
@@ -880,6 +1306,17 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
       <View style={styles.logActions}>
         <Pressable onPress={() => setScreenView("measure")} style={styles.secondaryButton}>
           <Text style={styles.secondaryButtonText}>Back to AR</Text>
+        </Pressable>
+
+        <Pressable
+          disabled={exportableMeasurementCount === 0}
+          onPress={() => void handleExportCsv()}
+          style={[
+            styles.secondaryButton,
+            exportableMeasurementCount === 0 && styles.buttonDisabledSecondary,
+          ]}
+        >
+          <Text style={styles.secondaryButtonText}>Export CSV</Text>
         </Pressable>
 
         <Pressable onPress={confirmClearAllMeasurements} style={styles.secondaryButton}>
@@ -1074,15 +1511,52 @@ export function MeasurementScreen({ onClose }: MeasurementScreenProps) {
         </View>
 
         <View style={styles.topBarActions}>
-          {screenView === "measure" ? (
-            <Pressable onPress={() => setScreenView("log")} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>Measurement Log</Text>
-            </Pressable>
-          ) : null}
-
-          <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>Close</Text>
+          <Pressable
+            accessibilityLabel="Open measurement menu"
+            accessibilityRole="button"
+            onPress={() => setIsOverflowMenuOpen((current) => !current)}
+            style={styles.menuButton}
+          >
+            <Text style={styles.menuButtonText}>...</Text>
           </Pressable>
+
+          {isOverflowMenuOpen ? (
+            <View style={styles.overflowMenu}>
+              {screenView === "measure" ? (
+                <Pressable
+                  onPress={() => {
+                    setScreenView("log");
+                    setIsOverflowMenuOpen(false);
+                  }}
+                  style={styles.menuItem}
+                >
+                  <Text style={styles.menuItemText}>Measurement Log</Text>
+                </Pressable>
+              ) : null}
+
+              {screenView !== "measure" ? (
+                <Pressable
+                  onPress={() => {
+                    setScreenView("measure");
+                    setIsOverflowMenuOpen(false);
+                  }}
+                  style={styles.menuItem}
+                >
+                  <Text style={styles.menuItemText}>Back to AR</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                onPress={() => {
+                  setIsOverflowMenuOpen(false);
+                  onClose();
+                }}
+                style={styles.menuItem}
+              >
+                <Text style={styles.menuItemText}>Close Workspace</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -1117,6 +1591,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#050505",
   },
   topBarActions: {
+    position: "relative",
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -1133,6 +1608,49 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 4,
   },
+  menuButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#d4d4d4",
+    backgroundColor: "#f7f7f7",
+  },
+  menuButtonText: {
+    color: "#111111",
+    fontSize: 18,
+    fontWeight: "800",
+    lineHeight: 18,
+  },
+  overflowMenu: {
+    position: "absolute",
+    right: 0,
+    top: 42,
+    zIndex: 20,
+    minWidth: 180,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#d4d4d4",
+    backgroundColor: "#ffffff",
+    padding: 6,
+    shadowColor: "#000000",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  menuItem: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  menuItemText: {
+    color: "#111111",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   closeButton: {
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1144,11 +1662,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   measureContainer: {
-    flex: 1,
+    flexGrow: 1,
+    paddingBottom: 18,
   },
   arContainer: {
-    flex: 1,
-    backgroundColor: "#101010",
+    minHeight: 620,
+    backgroundColor: "#050505",
+    overflow: "hidden",
   },
   arView: {
     flex: 1,
@@ -1195,11 +1715,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#d64545",
   },
   bottomPanel: {
-    paddingHorizontal: 18,
-    paddingTop: 14,
-    paddingBottom: 24,
-    backgroundColor: "#111111",
-    gap: 12,
+    gap: 8,
+    marginTop: -230,
+    paddingHorizontal: 12,
+    paddingTop: 0,
+    paddingBottom: 18,
+    backgroundColor: "transparent",
   },
   statusText: {
     color: "#f4f4f4",
@@ -1220,20 +1741,21 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    borderRadius: 999,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#444",
+    borderColor: "rgba(255,255,255,0.28)",
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#171717",
+    paddingVertical: 7,
+    backgroundColor: "rgba(18,18,18,0.72)",
   },
   chipSelected: {
     borderColor: "#f0b429",
     backgroundColor: "#2b2412",
   },
   chipText: {
-    color: "#d7d7d7",
-    fontWeight: "500",
+    color: "#f4f4f4",
+    fontSize: 13,
+    fontWeight: "700",
   },
   chipTextSelected: {
     color: "#fff2cc",
@@ -1274,16 +1796,46 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
   },
+  placementPanel: {
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+    backgroundColor: "rgba(12,12,12,0.72)",
+    padding: 9,
+  },
+  placementActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  dangerButton: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#c2410c",
+    backgroundColor: "#fff7ed",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  dangerButtonText: {
+    color: "#9a3412",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   primaryButton: {
     flex: 1,
-    backgroundColor: "#f0b429",
-    paddingVertical: 14,
-    borderRadius: 14,
+    minHeight: 42,
     alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+    backgroundColor: "#f0b429",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   primaryButtonText: {
-    color: "#111111",
-    fontWeight: "700",
+    color: "#050505",
+    fontSize: 15,
+    fontWeight: "800",
   },
   secondaryButton: {
     paddingVertical: 14,

@@ -28,6 +28,9 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     let tracking: TrackingSnapshot
     let reticleState: String
     let message: String
+    let depthMeters: Float?
+    let depthConfidence: Int?
+    let frameTimestamp: TimeInterval
   }
 
   private struct CapturedEndpoint {
@@ -58,6 +61,12 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     var rejectedSampleCount: Int
   }
 
+  private let endpointMinimumSamples = 12
+  private let endpointPreferredSamples = 24
+  private let endpointMaximumDuration: TimeInterval = 0.7
+  private let endpointMaximumSpreadMeters: Float = 0.025
+  private let depthNeighborhoodRadius = 2
+
   @objc var onMeasurementUpdate: RCTBubblingEventBlock?
 
   @objc var resetCounter: NSNumber = 0 {
@@ -76,6 +85,30 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
 
   @objc var capturePointRole: NSString = "start"
 
+  @objc var placementRequest: NSDictionary? {
+    didSet {
+      handlePlacementRequest(placementRequest)
+    }
+  }
+
+  @objc var placedObjects: NSArray? {
+    didSet {
+      syncPlacedObjects(placedObjects)
+    }
+  }
+
+  @objc var selectedPlacedObjectId: NSString? {
+    didSet {
+      updatePlacementSelection()
+    }
+  }
+
+  @objc var placementEditRequest: NSDictionary? {
+    didSet {
+      handlePlacementEditRequest(placementEditRequest)
+    }
+  }
+
   private let sceneView = ARSCNView(frame: .zero)
   private let timestampFormatter = ISO8601DateFormatter()
 
@@ -85,6 +118,10 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     localizedState: "not-available"
   )
   private var latestReticleTarget: RaycastTarget?
+  private var placementNodesById: [String: SCNNode] = [:]
+  private var placementSnapshotsById: [String: [String: Any]] = [:]
+  private var lastPlacementRequestId: Int = 0
+  private var lastPlacementEditRequestId: Int = 0
   private var pendingCapture: PendingCapture?
   private var startEndpoint: CapturedEndpoint?
   private var endEndpoint: CapturedEndpoint?
@@ -147,7 +184,9 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     configuration.planeDetection = [.horizontal, .vertical]
     configuration.environmentTexturing = .automatic
 
-    if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+    if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
+      configuration.frameSemantics.insert(.smoothedSceneDepth)
+    } else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
       configuration.frameSemantics.insert(.sceneDepth)
     }
 
@@ -209,7 +248,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
 
   func session(_ session: ARSession, didUpdate frame: ARFrame) {
     currentTracking = trackingSnapshot(from: frame.camera.trackingState)
-    latestReticleTarget = resolveCenterTarget(frame: frame)
+    latestReticleTarget = resolveDepthNeighborhoodTarget(frame: frame) ?? resolveCenterTarget(frame: frame)
     processPendingCapture(with: frame)
     emitTrackingUpdateIfNeeded()
   }
@@ -217,16 +256,34 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
   private func processPendingCapture(with frame: ARFrame) {
     guard var pendingCapture else { return }
 
-    if let target = resolveCenterTarget(frame: frame), target.reticleState != "red" {
+    if currentTracking.quality != "normal" {
+      pendingCapture.rejectedSampleCount += 1
+    } else if let target = resolveDepthNeighborhoodTarget(frame: frame) ?? resolveCenterTarget(frame: frame),
+       target.reticleState != "red" {
       pendingCapture.acceptedSamples.append(target)
     } else {
       pendingCapture.rejectedSampleCount += 1
     }
 
     let elapsed = Date().timeIntervalSince(pendingCapture.startedAt)
-    if pendingCapture.acceptedSamples.count >= 5 || elapsed >= 0.25 {
-      finalizeCapture(pendingCapture)
-      self.pendingCapture = nil
+    if pendingCapture.acceptedSamples.count >= endpointPreferredSamples
+      || (pendingCapture.acceptedSamples.count >= endpointMinimumSamples && elapsed >= 0.35)
+      || elapsed >= endpointMaximumDuration {
+      if pendingCapture.acceptedSamples.count >= endpointMinimumSamples {
+        finalizeCapture(pendingCapture)
+        self.pendingCapture = nil
+      } else if elapsed >= endpointMaximumDuration {
+        emitUpdate(
+          action: [
+            "kind": "capture-failed",
+            "pointRole": pendingCapture.role,
+            "message": "Capture failed because too few reliable spatial samples were collected. Hold steady and rescan."
+          ]
+        )
+        self.pendingCapture = nil
+      } else {
+        self.pendingCapture = pendingCapture
+      }
     } else {
       self.pendingCapture = pendingCapture
     }
@@ -257,22 +314,49 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     let baselinePoint = medianPoint(of: sameSourceSamples.map(\.point))
 
     let deviations = sameSourceSamples.map { simd_length($0.point - baselinePoint) }
-    let acceptedPairs = zip(sameSourceSamples, deviations).filter { $0.1 <= 0.03 }
+    let acceptedPairs = zip(sameSourceSamples, deviations).filter { $0.1 <= endpointMaximumSpreadMeters }
     let acceptedSamples = acceptedPairs.isEmpty ? sameSourceSamples : acceptedPairs.map(\.0)
     let finalPoint = averagePoint(of: acceptedSamples.map(\.point))
-    let maximumDeviation = deviations.max() ?? 0
+    let acceptedDeviations = acceptedSamples.map { simd_length($0.point - finalPoint) }
+    let maximumDeviation = acceptedDeviations.max() ?? deviations.max() ?? 0
+    let medianDeviation = median(acceptedDeviations)
     let representative = acceptedSamples[0]
     let capturedAt = timestampFormatter.string(from: Date())
 
-    let diagnostics: [String: Any] = [
+    guard acceptedSamples.count >= endpointMinimumSamples,
+      maximumDeviation <= endpointMaximumSpreadMeters else {
+      emitUpdate(
+        action: [
+          "kind": "capture-failed",
+          "pointRole": pendingCapture.role,
+          "message": "Capture failed because endpoint samples were not stable enough. Hold steady and rescan."
+        ]
+      )
+      return
+    }
+
+    let highConfidenceDepthCount = acceptedSamples.filter { ($0.depthConfidence ?? -1) >= 2 }.count
+    let firstTimestamp = acceptedSamples.map(\.frameTimestamp).min() ?? 0
+    let lastTimestamp = acceptedSamples.map(\.frameTimestamp).max() ?? firstTimestamp
+
+    var diagnostics: [String: Any] = [
       "sampleCountCollected": pendingCapture.acceptedSamples.count,
       "acceptedSampleCount": acceptedSamples.count,
       "rejectedSampleCount": pendingCapture.rejectedSampleCount
         + max(0, sameSourceSamples.count - acceptedSamples.count),
       "maximumDeviationMeters": maximumDeviation,
+      "medianDeviationMeters": medianDeviation,
+      "highConfidenceDepthSampleCount": highConfidenceDepthCount,
+      "sampleWindowSeconds": max(0, lastTimestamp - firstTimestamp),
       "sourceCounts": sourceCounts,
       "reticleState": representative.reticleState
     ]
+    if let depthConfidence = representative.depthConfidence {
+      diagnostics["depthConfidence"] = depthConfidence
+    }
+    if let depthMeters = representative.depthMeters {
+      diagnostics["depthMeters"] = depthMeters
+    }
 
     let endpoint = CapturedEndpoint(
       point: finalPoint,
@@ -453,16 +537,183 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
         point: point,
         source: "feature-point",
         planeAlignment: "unknown",
-        usedFallback: true,
-        tracking: tracking,
-        reticleState: tracking.quality == "normal" ? "yellow" : "red",
-        message: tracking.quality == "normal"
-          ? "Reticle is using a lower-confidence feature point target."
-          : "Feature points are visible, but tracking is limited."
-      )
-    }
+      usedFallback: true,
+      tracking: tracking,
+      reticleState: tracking.quality == "normal" ? "yellow" : "red",
+      message: tracking.quality == "normal"
+        ? "Reticle is using a lower-confidence feature point target."
+        : "Feature points are visible, but tracking is limited.",
+      depthMeters: nil,
+      depthConfidence: nil,
+      frameTimestamp: frame.timestamp
+    )
+  }
 
     return nil
+  }
+
+  private func resolveDepthNeighborhoodTarget(frame: ARFrame) -> RaycastTarget? {
+    guard let sceneDepth = frame.smoothedSceneDepth ?? frame.sceneDepth else {
+      return nil
+    }
+
+    let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+    guard let depthPixel = depthPixelPoint(for: center, frame: frame, depthMap: sceneDepth.depthMap) else {
+      return nil
+    }
+
+    let depthMap = sceneDepth.depthMap
+    let confidenceMap = sceneDepth.confidenceMap
+    CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+    if let confidenceMap {
+      CVPixelBufferLockBaseAddress(confidenceMap, .readOnly)
+    }
+    defer {
+      CVPixelBufferUnlockBaseAddress(depthMap, .readOnly)
+      if let confidenceMap {
+        CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly)
+      }
+    }
+
+    guard let depthBaseAddress = CVPixelBufferGetBaseAddress(depthMap) else {
+      return nil
+    }
+
+    let width = CVPixelBufferGetWidth(depthMap)
+    let height = CVPixelBufferGetHeight(depthMap)
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
+    let depthPointer = depthBaseAddress.assumingMemoryBound(to: Float32.self)
+    let confidencePointer: UnsafeMutablePointer<UInt8>?
+    let confidenceBytesPerRow: Int?
+    if let confidenceMap {
+      confidencePointer = CVPixelBufferGetBaseAddress(confidenceMap)?.assumingMemoryBound(to: UInt8.self)
+      confidenceBytesPerRow = CVPixelBufferGetBytesPerRow(confidenceMap)
+    } else {
+      confidencePointer = nil
+      confidenceBytesPerRow = nil
+    }
+
+    var worldPoints: [SIMD3<Float>] = []
+    var depths: [Float] = []
+    var confidenceValues: [Int] = []
+
+    let centerX = Int(round(depthPixel.x))
+    let centerY = Int(round(depthPixel.y))
+    let minX = max(0, centerX - depthNeighborhoodRadius)
+    let maxX = min(width - 1, centerX + depthNeighborhoodRadius)
+    let minY = max(0, centerY - depthNeighborhoodRadius)
+    let maxY = min(height - 1, centerY + depthNeighborhoodRadius)
+
+    for y in minY...maxY {
+      for x in minX...maxX {
+        let depthIndex = y * (bytesPerRow / MemoryLayout<Float32>.size) + x
+        let depth = depthPointer[depthIndex]
+        guard depth.isFinite, depth > 0.05, depth < 8 else {
+          continue
+        }
+
+        let confidence: Int
+        if let confidencePointer, let confidenceBytesPerRow {
+          let confidenceIndex = y * confidenceBytesPerRow + x
+          confidence = Int(confidencePointer[confidenceIndex])
+          guard confidence >= Int(ARConfidenceLevel.medium.rawValue) else {
+            continue
+          }
+        } else {
+          confidence = Int(ARConfidenceLevel.medium.rawValue)
+        }
+
+        let point = worldPointFromDepthPixel(
+          x: Float(x),
+          y: Float(y),
+          depth: depth,
+          depthMapSize: CGSize(width: width, height: height),
+          frame: frame
+        )
+        worldPoints.append(point)
+        depths.append(depth)
+        confidenceValues.append(confidence)
+      }
+    }
+
+    guard worldPoints.count >= 5 else {
+      return nil
+    }
+
+    let baselinePoint = medianPoint(of: worldPoints)
+    let deviations = worldPoints.map { simd_length($0 - baselinePoint) }
+    let acceptedPairs = zip(worldPoints, deviations).filter { $0.1 <= endpointMaximumSpreadMeters }
+    let acceptedPoints = acceptedPairs.isEmpty ? worldPoints : acceptedPairs.map(\.0)
+    guard acceptedPoints.count >= 5 else {
+      return nil
+    }
+
+    let finalPoint = medianPoint(of: acceptedPoints)
+    let medianDepth = median(depths)
+    let highConfidenceCount = confidenceValues.filter { $0 >= Int(ARConfidenceLevel.high.rawValue) }.count
+    let representativeConfidence = highConfidenceCount >= max(1, confidenceValues.count / 2)
+      ? Int(ARConfidenceLevel.high.rawValue)
+      : Int(ARConfidenceLevel.medium.rawValue)
+    let tracking = trackingSnapshot(from: frame.camera.trackingState)
+
+    return RaycastTarget(
+      point: finalPoint,
+      source: "scene-depth",
+      planeAlignment: "unknown",
+      usedFallback: false,
+      tracking: tracking,
+      reticleState: tracking.quality == "normal" ? "green" : "red",
+      message: "Reticle locked to stabilized LiDAR scene depth.",
+      depthMeters: medianDepth,
+      depthConfidence: representativeConfidence,
+      frameTimestamp: frame.timestamp
+    )
+  }
+
+  private func depthPixelPoint(for viewPoint: CGPoint, frame: ARFrame, depthMap: CVPixelBuffer) -> CGPoint? {
+    guard sceneView.bounds.width > 0, sceneView.bounds.height > 0 else {
+      return nil
+    }
+
+    let orientation = window?.windowScene?.interfaceOrientation ?? .portrait
+    let normalizedViewPoint = CGPoint(
+      x: viewPoint.x / sceneView.bounds.width,
+      y: viewPoint.y / sceneView.bounds.height
+    )
+    let displayTransform = frame.displayTransform(for: orientation, viewportSize: sceneView.bounds.size)
+    let imagePoint = normalizedViewPoint.applying(displayTransform.inverted())
+
+    guard imagePoint.x.isFinite, imagePoint.y.isFinite else {
+      return nil
+    }
+
+    let width = CGFloat(CVPixelBufferGetWidth(depthMap))
+    let height = CGFloat(CVPixelBufferGetHeight(depthMap))
+    return CGPoint(
+      x: min(max(imagePoint.x * width, 0), width - 1),
+      y: min(max(imagePoint.y * height, 0), height - 1)
+    )
+  }
+
+  private func worldPointFromDepthPixel(
+    x: Float,
+    y: Float,
+    depth: Float,
+    depthMapSize: CGSize,
+    frame: ARFrame
+  ) -> SIMD3<Float> {
+    let imageResolution = frame.camera.imageResolution
+    var intrinsics = frame.camera.intrinsics
+    intrinsics.columns.0.x *= Float(depthMapSize.width / imageResolution.width)
+    intrinsics.columns.1.y *= Float(depthMapSize.height / imageResolution.height)
+    intrinsics.columns.2.x *= Float(depthMapSize.width / imageResolution.width)
+    intrinsics.columns.2.y *= Float(depthMapSize.height / imageResolution.height)
+
+    let cameraX = (x - intrinsics.columns.2.x) * depth / intrinsics.columns.0.x
+    let cameraY = -(y - intrinsics.columns.2.y) * depth / intrinsics.columns.1.y
+    let cameraPoint = SIMD4<Float>(cameraX, cameraY, -depth, 1)
+    let worldPoint = frame.camera.transform * cameraPoint
+    return SIMD3<Float>(worldPoint.x, worldPoint.y, worldPoint.z)
   }
 
   private func makeRaycastTarget(
@@ -499,7 +750,10 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       usedFallback: usedFallback,
       tracking: tracking,
       reticleState: reticleState,
-      message: message
+      message: message,
+      depthMeters: nil,
+      depthConfidence: nil,
+      frameTimestamp: sceneView.session.currentFrame?.timestamp ?? 0
     )
   }
 
@@ -569,6 +823,8 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
 
   private func sourcePriority(_ source: String) -> Int {
     switch source {
+    case "scene-depth":
+      return 5
     case "existing-plane-geometry":
       return 4
     case "existing-plane-infinite":
@@ -621,6 +877,213 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     let node = SCNNode(geometry: geometry)
     node.simdPosition = point
     return node
+  }
+
+  private func handlePlacementRequest(_ request: NSDictionary?) {
+    guard let request else { return }
+    guard let requestId = numberValue(request["requestId"])?.intValue else { return }
+    guard requestId != lastPlacementRequestId else { return }
+    lastPlacementRequestId = requestId
+
+    guard let target = latestReticleTarget else {
+      emitPlacement(kind: "placement-failed", message: "Aim at a tracked surface before placing an object.")
+      return
+    }
+
+    guard let catalogObjectId = request["catalogObjectId"] as? String,
+          let displayName = request["displayName"] as? String,
+          let placementMode = request["placementMode"] as? String,
+          let dimensions = request["dimensions"] as? NSDictionary else {
+      emitPlacement(kind: "placement-failed", message: "The selected catalog object is missing placement metadata.")
+      return
+    }
+
+    let id = "placement-\(Int(Date().timeIntervalSince1970 * 1000))"
+    let snapshot = placementSnapshot(
+      id: id,
+      catalogObjectId: catalogObjectId,
+      displayName: displayName,
+      placementMode: placementMode,
+      dimensions: dimensions,
+      point: target.point,
+      rotationY: 0
+    )
+
+    upsertPlacementNode(snapshot)
+    selectedPlacedObjectId = id as NSString
+    updatePlacementSelection()
+    emitPlacement(kind: "object-placed", message: "\(displayName) placed in the AR scene.", object: snapshot)
+  }
+
+  private func handlePlacementEditRequest(_ request: NSDictionary?) {
+    guard let request else { return }
+    guard let requestId = numberValue(request["requestId"])?.intValue else { return }
+    guard requestId != lastPlacementEditRequestId else { return }
+    lastPlacementEditRequestId = requestId
+
+    guard let objectId = request["objectId"] as? String,
+          let action = request["action"] as? String else { return }
+
+    if action == "remove" {
+      placementNodesById[objectId]?.removeFromParentNode()
+      placementNodesById.removeValue(forKey: objectId)
+      placementSnapshotsById.removeValue(forKey: objectId)
+      emitPlacement(kind: "object-removed", message: "Object removed from the AR scene.", objectId: objectId)
+      return
+    }
+
+    guard var snapshot = placementSnapshotsById[objectId] else { return }
+    let currentRotation = numberValue(snapshot["rotationY"])?.floatValue ?? 0
+    let delta: Float = action == "rotate-left" ? -.pi / 12 : .pi / 12
+    snapshot["rotationY"] = currentRotation + delta
+    placementSnapshotsById[objectId] = snapshot
+    upsertPlacementNode(snapshot)
+    emitPlacement(kind: "object-updated", message: "Object rotation updated.", object: snapshot)
+  }
+
+  private func syncPlacedObjects(_ objects: NSArray?) {
+    let snapshots = (objects as? [[String: Any]]) ?? []
+    var nextIds = Set<String>()
+
+    for snapshot in snapshots {
+      guard let id = snapshot["id"] as? String else { continue }
+      nextIds.insert(id)
+      placementSnapshotsById[id] = snapshot
+      upsertPlacementNode(snapshot)
+    }
+
+    for id in placementNodesById.keys where !nextIds.contains(id) {
+      placementNodesById[id]?.removeFromParentNode()
+      placementNodesById.removeValue(forKey: id)
+      placementSnapshotsById.removeValue(forKey: id)
+    }
+
+    updatePlacementSelection()
+  }
+
+  private func upsertPlacementNode(_ snapshot: [String: Any]) {
+    guard let id = snapshot["id"] as? String,
+          let dimensions = snapshot["dimensions"] as? [String: Any],
+          let position = snapshot["position"] as? [String: Any] else { return }
+
+    let width = CGFloat(numberValue(dimensions["width"])?.doubleValue ?? 0.2)
+    let height = CGFloat(numberValue(dimensions["height"])?.doubleValue ?? 0.2)
+    let depth = CGFloat(numberValue(dimensions["depth"])?.doubleValue ?? 0.08)
+    let box = SCNBox(
+      width: max(width, 0.02),
+      height: max(height, 0.02),
+      length: max(depth, 0.02),
+      chamferRadius: 0.006
+    )
+    box.firstMaterial?.diffuse.contents = UIColor.systemTeal.withAlphaComponent(0.78)
+    box.firstMaterial?.emission.contents = UIColor.systemTeal.withAlphaComponent(0.08)
+
+    let node = placementNodesById[id] ?? SCNNode()
+    node.geometry = box
+    node.name = id
+    node.position = SCNVector3(
+      Float(numberValue(position["x"])?.doubleValue ?? 0),
+      Float(numberValue(position["y"])?.doubleValue ?? 0),
+      Float(numberValue(position["z"])?.doubleValue ?? 0)
+    )
+    node.eulerAngles.y = numberValue(snapshot["rotationY"])?.floatValue ?? 0
+
+    if placementNodesById[id] == nil {
+      sceneView.scene.rootNode.addChildNode(node)
+      placementNodesById[id] = node
+    }
+
+    updatePlacementSelection()
+  }
+
+  private func updatePlacementSelection() {
+    let selectedId = selectedPlacedObjectId as String?
+    for (id, node) in placementNodesById {
+      let isSelected = id == selectedId
+      node.opacity = isSelected ? 0.95 : 0.72
+      node.scale = isSelected ? SCNVector3(1.05, 1.05, 1.05) : SCNVector3(1, 1, 1)
+    }
+  }
+
+  private func placementSnapshot(
+    id: String,
+    catalogObjectId: String,
+    displayName: String,
+    placementMode: String,
+    dimensions: NSDictionary,
+    point: SIMD3<Float>,
+    rotationY: Float
+  ) -> [String: Any] {
+    [
+      "id": id,
+      "catalogObjectId": catalogObjectId,
+      "displayName": displayName,
+      "placementMode": placementMode,
+      "dimensions": [
+        "width": numberValue(dimensions["width"])?.doubleValue ?? 0.2,
+        "height": numberValue(dimensions["height"])?.doubleValue ?? 0.2,
+        "depth": numberValue(dimensions["depth"])?.doubleValue ?? 0.08
+      ],
+      "position": [
+        "x": point.x,
+        "y": point.y,
+        "z": point.z
+      ],
+      "rotationY": rotationY
+    ]
+  }
+
+  private func emitPlacement(
+    kind: String,
+    message: String,
+    object: [String: Any]? = nil,
+    objectId: String? = nil
+  ) {
+    var placement: [String: Any] = [
+      "kind": kind,
+      "message": message
+    ]
+    if let object {
+      placement["object"] = object
+    }
+    if let objectId {
+      placement["objectId"] = objectId
+    }
+
+    var action: [String: Any] = [
+      "kind": kind,
+      "message": message
+    ]
+    if let objectId {
+      action["objectId"] = objectId
+    }
+
+    var payload: [String: Any] = [
+      "lastAction": action,
+      "tracking": currentTracking.toDictionary(),
+      "reticle": reticlePayload(),
+      "placement": placement
+    ]
+    if let measurement = measurementPayload() {
+      payload["measurement"] = measurement
+    }
+    onMeasurementUpdate?(payload)
+  }
+
+  private func numberValue(_ value: Any?) -> NSNumber? {
+    if let number = value as? NSNumber {
+      return number
+    }
+    if let double = value as? Double {
+      return NSNumber(value: double)
+    }
+    if let float = value as? Float {
+      return NSNumber(value: float)
+    }
+    if let int = value as? Int {
+      return NSNumber(value: int)
+    }
+    return nil
   }
 
   private func rebuildMeasurementLine() {

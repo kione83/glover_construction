@@ -37,6 +37,43 @@ const DEFAULT_ROOM = "construction-demo";
  * Local-development WebRTC publisher. The signaling server relays only SDP and
  * ICE messages; video travels directly between the iPhone and laptop browser.
  */
+function normalizeSignalServerUrl(input: string): { url?: string; error?: string } {
+  const value = input.trim();
+
+  if (!value) {
+    return { error: "Enter the signal server URL, for example ws://10.0.0.81:8080/signal." };
+  }
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return {
+      error:
+        "That is the browser viewer URL. In the phone app, use the WebSocket URL: ws://10.0.0.81:8080/signal.",
+    };
+  }
+
+  const url = value.startsWith("ws://") || value.startsWith("wss://") ? value : `ws://${value}`;
+
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      return { error: "Signal URL must start with ws:// or wss://." };
+    }
+
+    if (parsed.pathname === "/" || parsed.pathname === "") {
+      parsed.pathname = "/signal";
+    }
+
+    if (parsed.pathname !== "/signal") {
+      return { error: "Signal URL must end with /signal." };
+    }
+
+    return { url: parsed.toString() };
+  } catch {
+    return { error: "Enter a valid signal URL, for example ws://10.0.0.81:8080/signal." };
+  }
+}
+
 export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreenProps) {
   const [serverUrl, setServerUrl] = useState(process.env.EXPO_PUBLIC_SIGNALING_URL ?? "");
   const [room, setRoom] = useState(DEFAULT_ROOM);
@@ -113,13 +150,18 @@ export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreen
   }
 
   function connect() {
-    if (!serverUrl.startsWith("ws://") && !serverUrl.startsWith("wss://")) {
-      Alert.alert("Invalid signaling URL", "Use a WebSocket URL, for example ws://192.168.1.25:8080/signal.");
-      return;
-    }
     stopPublishing();
     setStatus("Connecting to local signaling server…");
-    const socket = new WebSocket(serverUrl);
+    const signalUrl = normalizeSignalServerUrl(serverUrl);
+
+    if (signalUrl.error || !signalUrl.url) {
+      setStatus(signalUrl.error ?? "Enter a valid signal URL.");
+      return;
+    }
+
+    setServerUrl(signalUrl.url);
+
+    const socket = new WebSocket(signalUrl.url);
     socketRef.current = socket;
     socket.onopen = () => {
       send({ type: "join", role: "publisher", room: room.trim() || DEFAULT_ROOM });
@@ -164,7 +206,7 @@ export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreen
         <View style={styles.panel}>
           <Text style={styles.title}>Stream to laptop</Text>
           <Text style={styles.copy}>{status}</Text>
-          <TextInput autoCapitalize="none" autoCorrect={false} value={serverUrl} onChangeText={setServerUrl} placeholder="ws://192.168.1.25:8080/signal" placeholderTextColor="#cfcfcf" style={styles.input} />
+          <TextInput autoCapitalize="none" autoCorrect={false} value={serverUrl} onChangeText={setServerUrl} placeholder="ws://10.0.0.81:8080/signal" placeholderTextColor="#cfcfcf" style={styles.input} />
           <TextInput autoCapitalize="none" autoCorrect={false} value={room} onChangeText={setRoom} placeholder="Room code" placeholderTextColor="#cfcfcf" style={styles.input} />
           <View style={styles.actions}>
             <Pressable style={styles.primaryButton} onPress={connect}><Text style={styles.primaryButtonText}>Connect phone</Text></Pressable>
