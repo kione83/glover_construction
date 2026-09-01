@@ -7,6 +7,8 @@ import {
   RTCIceCandidate,
   RTCSessionDescription,
 } from "react-native-webrtc";
+import type { ProjectSpatialModel, RoomScanData } from "../../domain/projects";
+import { colors } from "../../theme/colors";
 
 const DEFAULT_ROOM = "construction-demo";
 const DEFAULT_SIGNAL_URL = "ws://10.0.0.81:8080/signal";
@@ -56,9 +58,27 @@ function normalizeSignalServerUrl(input: string): { url?: string; error?: string
 interface LiveStreamPanelProps {
   compact?: boolean;
   disabledReason?: string;
+  layoutItems?: Array<{
+    id: string;
+    displayName: string;
+    dimensions: { width: number; height: number; depth: number };
+    position: { x: number; y: number; z: number };
+    rotationY: number;
+    representation?: string;
+  }>;
+  roomScan?: RoomScanData;
+  projectRooms?: Array<{ id: string; name: string; roomScan?: RoomScanData }>;
+  spatialModel?: ProjectSpatialModel;
+  liveMeasurements?: Array<{
+    id: string;
+    label: string;
+    value: number;
+    unit: string;
+    status: "estimated" | "estimating" | "stable" | "limited";
+  }>;
 }
 
-export function LiveStreamPanel({ compact = false, disabledReason }: LiveStreamPanelProps) {
+export function LiveStreamPanel({ compact = false, disabledReason, layoutItems = [], roomScan, projectRooms = [], spatialModel, liveMeasurements = [] }: LiveStreamPanelProps) {
   const [serverUrl, setServerUrl] = useState(process.env.EXPO_PUBLIC_SIGNALING_URL ?? DEFAULT_SIGNAL_URL);
   const [room, setRoom] = useState(DEFAULT_ROOM);
   const [status, setStatus] = useState("Ready to stream this measurement session.");
@@ -68,12 +88,30 @@ export function LiveStreamPanel({ compact = false, disabledReason }: LiveStreamP
   const streamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const isPublishingRef = useRef(false);
+  const layoutChannelRef = useRef<ReturnType<RTCPeerConnection["createDataChannel"]> | null>(null);
 
   function sendSignal(message: SignalMessage) {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(message));
     }
   }
+
+  function sendLayout() {
+    if (layoutChannelRef.current?.readyState === "open") {
+      layoutChannelRef.current.send(JSON.stringify({
+        type: "layout",
+        items: layoutItems,
+        roomScan,
+        rooms: projectRooms,
+        spatialModel,
+        liveMeasurements,
+      }));
+    }
+  }
+
+  useEffect(() => {
+    sendLayout();
+  }, [layoutItems, roomScan, projectRooms, spatialModel, liveMeasurements]);
 
   async function startCameraStream(peerConnection: RTCPeerConnection) {
     const stream = await mediaDevices.getUserMedia({
@@ -139,6 +177,9 @@ export function LiveStreamPanel({ compact = false, disabledReason }: LiveStreamP
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
         peerConnectionRef.current = peerConnection;
+        const layoutChannel = peerConnection.createDataChannel("construction-layout");
+        layoutChannelRef.current = layoutChannel;
+        layoutChannel.onopen = sendLayout;
         peerConnection.onicecandidate = (event: { candidate: RTCIceCandidate | null }) => {
           if (event.candidate) {
             sendSignal({ type: "candidate", room, role: "publisher", candidate: event.candidate.toJSON() });
@@ -181,6 +222,7 @@ export function LiveStreamPanel({ compact = false, disabledReason }: LiveStreamP
     socketRef.current = null;
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
+    layoutChannelRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     queuedCandidatesRef.current = [];
@@ -208,7 +250,7 @@ export function LiveStreamPanel({ compact = false, disabledReason }: LiveStreamP
             keyboardType="url"
             onChangeText={setServerUrl}
             placeholder="ws://10.0.0.81:8080/signal"
-            placeholderTextColor="#8f8778"
+            placeholderTextColor={colors.muted}
             style={styles.input}
             value={serverUrl}
           />
@@ -217,7 +259,7 @@ export function LiveStreamPanel({ compact = false, disabledReason }: LiveStreamP
             autoCorrect={false}
             onChangeText={setRoom}
             placeholder="construction-demo"
-            placeholderTextColor="#8f8778"
+            placeholderTextColor={colors.muted}
             style={styles.input}
             value={room}
           />
@@ -251,15 +293,15 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#ded8cc",
-    backgroundColor: "#f8f6f1",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     padding: 14,
   },
   compactPanel: {
     padding: 10,
     gap: 8,
     borderRadius: 12,
-    backgroundColor: "rgba(248,246,241,0.92)",
+    backgroundColor: "rgba(255,255,255,0.92)",
   },
   headerRow: {
     flexDirection: "row",
@@ -268,13 +310,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: {
-    color: "#2c2924",
+    color: colors.text,
     fontSize: 14,
     fontWeight: "800",
     textTransform: "uppercase",
   },
   status: {
-    color: "#5d574d",
+    color: colors.muted,
     fontSize: 13,
     marginTop: 4,
   },
@@ -282,7 +324,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: "#9b9487",
+    backgroundColor: colors.muted,
     marginTop: 4,
   },
   statusDotActive: {
@@ -291,9 +333,9 @@ const styles = StyleSheet.create({
   input: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#ded8cc",
-    backgroundColor: "#ffffff",
-    color: "#191714",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    color: colors.text,
     fontSize: 15,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -320,15 +362,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   primaryButton: {
-    backgroundColor: "#2c2924",
+    backgroundColor: colors.navy,
   },
   secondaryButton: {
     borderWidth: 1,
-    borderColor: "#2c2924",
+    borderColor: colors.navy,
     backgroundColor: "transparent",
   },
   disabledButton: {
-    backgroundColor: "#9b9487",
+    backgroundColor: colors.muted,
   },
   primaryButtonText: {
     color: "#ffffff",
@@ -336,7 +378,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   secondaryButtonText: {
-    color: "#2c2924",
+    color: colors.navy,
     fontSize: 14,
     fontWeight: "800",
   },

@@ -86,6 +86,7 @@ export interface NativeMeasurementUpdatePayload {
   measurement?: NativeMeasurementSnapshot;
   reticle?: NativeMeasurementReticleSnapshot;
   tracking?: NativeMeasurementTrackingSnapshot;
+  furnitureIdentification?: { label: string; confidence: number; capturedAt: string };
   placement?: NativePlacementEvent;
   lastAction: NativeMeasurementAction;
 }
@@ -102,6 +103,7 @@ export interface NativePlacementRequest {
   displayName: string;
   placementMode: string;
   dimensions: NativePlacementDimensions;
+  representation?: string;
 }
 
 export interface NativePlacedObjectSnapshot {
@@ -112,16 +114,17 @@ export interface NativePlacedObjectSnapshot {
   dimensions: NativePlacementDimensions;
   position: NativeMeasurementPoint;
   rotationY: number;
+  representation?: string;
 }
 
 export interface NativePlacementEditRequest {
   requestId: number;
   objectId: string;
-  action: "rotate-left" | "rotate-right" | "remove";
+  action: "rotate-left" | "rotate-right" | "move-to-reticle" | "remove";
 }
 
 export interface NativePlacementEvent {
-  kind: "object-placed" | "object-updated" | "object-removed" | "placement-failed";
+  kind: "object-placed" | "object-updated" | "object-selected" | "object-removed" | "placement-failed";
   message: string;
   object?: NativePlacedObjectSnapshot;
   objectId?: string;

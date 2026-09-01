@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import {
   Alert,
+  LogBox,
   Platform,
   Pressable,
   SafeAreaView,
@@ -34,6 +35,10 @@ import {
   type PlacedObject,
   type Project,
   type ResolvedMeasurementEndpoint,
+  type RoomScanRepresentation,
+  clearRoomPlacementsFromProject,
+  removePlacedObjectFromProject,
+  updateProjectSummary,
 } from "../../domain";
 import type { ProjectDocument } from "../../storage/projectDocument";
 import {
@@ -55,6 +60,7 @@ import {
   type NativePlacementRequest,
 } from "./NativeMeasurementARView";
 import { LiveStreamPanel } from "../camera/LiveStreamPanel";
+import { colors } from "../../theme/colors";
 
 interface MeasurementScreenProps {
   initialCatalogObjectId?: string;
@@ -149,6 +155,7 @@ function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject): NativePlac
     },
     position: placedObject.transform.position,
     rotationY: placedObject.transform.rotation.yaw,
+    representation: placedObject.representation ?? catalogObject?.representation,
   };
 }
 
@@ -176,6 +183,7 @@ function mapNativeSnapshotToPlacedObject(
       depth: snapshot.dimensions.depth,
       unit: "m",
     },
+    representation: (snapshot.representation as RoomScanRepresentation | undefined) ?? starterCatalog.find((item) => item.id === snapshot.catalogObjectId)?.representation,
     status: "active",
     placedAt: existingObject?.placedAt ?? timestamp,
     updatedAt: timestamp,
@@ -196,6 +204,7 @@ function createPlacementRequest(
       height: catalogObject.defaultDimensions.height,
       depth: catalogObject.defaultDimensions.depth,
     },
+    representation: catalogObject.representation,
   };
 }
 
@@ -359,6 +368,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   const [tracking, setTracking] = useState<MeasurementTrackingSnapshot>(DEFAULT_TRACKING);
   const [reticle, setReticle] = useState<NativeMeasurementReticleSnapshot>(DEFAULT_RETICLE);
   const [status, setStatus] = useState("Aim at a tracked real-world surface to capture Point A.");
+  const [furnitureIdentification, setFurnitureIdentification] = useState<NativeMeasurementUpdatePayload["furnitureIdentification"]>();
   const [resetCounter, setResetCounter] = useState(0);
   const [captureRequestId, setCaptureRequestId] = useState(0);
   const [capturePointRole, setCapturePointRole] = useState<"start" | "end">("start");
@@ -542,18 +552,19 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
             object.id === placedObject.id ? placedObject : object,
           )
         : [...document.project.placedObjects, placedObject];
-      const updatedProject: Project = {
+      const nextProject: Project = {
         ...document.project,
         status: "layout-in-progress",
         placedObjects: nextPlacedObjects,
       };
+      const updatedProject = updateProjectSummary({
+        ...nextProject,
+        validationIssues: validateProject(nextProject, placedObject.updatedAt),
+      });
 
       return {
         ...document,
-        project: {
-          ...updatedProject,
-          validationIssues: validateProject(updatedProject, placedObject.updatedAt),
-        },
+        project: updatedProject,
       };
     });
 
@@ -563,21 +574,71 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   function removePlacementObject(objectId: string) {
     void updateSelectedProjectDocument((document) => {
       const timestamp = new Date().toISOString();
-      const updatedProject: Project = {
-        ...document.project,
-        placedObjects: document.project.placedObjects.filter((object) => object.id !== objectId),
-      };
+      const clearedProject = removePlacedObjectFromProject(document.project, objectId);
+      const updatedProject = updateProjectSummary({
+        ...clearedProject,
+        validationIssues: validateProject(clearedProject, timestamp),
+      });
 
       return {
         ...document,
-        project: {
-          ...updatedProject,
-          validationIssues: validateProject(updatedProject, timestamp),
-        },
+        project: updatedProject,
       };
     });
 
     setSelectedPlacedObjectId((current) => (current === objectId ? undefined : current));
+  }
+
+  function confirmClearCurrentRoomPlacements() {
+    if (!selectedRoom || !selectedRoomId) {
+      Alert.alert("No room selected", "Select a room before clearing placements.");
+      return;
+    }
+
+    const count = activeRoomPlacedObjects.length;
+    if (count === 0) {
+      Alert.alert("No placements", `There are no virtual placements in ${selectedRoom.name}.`);
+      return;
+    }
+
+    Alert.alert(
+      `Clear placements in ${selectedRoom.name}?`,
+      `This removes ${count} virtual placement${count === 1 ? "" : "s"}. Measurements, the room scan, and saved project data will remain intact.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear Placements",
+          style: "destructive",
+          onPress: () => {
+            const detectedAt = new Date().toISOString();
+            void updateSelectedProjectDocument((document) => {
+              const clearedProject = clearRoomPlacementsFromProject(
+                document.project,
+                selectedRoomId,
+              );
+              return {
+                ...document,
+                project: updateProjectSummary({
+                  ...clearedProject,
+                  validationIssues: validateProject(clearedProject, detectedAt),
+                }),
+              };
+            });
+            setSelectedPlacedObjectId(undefined);
+            setPlacementRequest(null);
+            setPlacementEditRequest(null);
+            setFurnitureIdentification(undefined);
+            setStatus("Room placements cleared. Measurements and room data are still saved.");
+          },
+        },
+      ],
+    );
+  }
+
+  function clearErrorLogs() {
+    (LogBox as unknown as { clearAllLogs?: () => void }).clearAllLogs?.();
+    setIsOverflowMenuOpen(false);
+    setStatus("In-app error and debug logs cleared.");
   }
 
   function handlePlacementUpdate(payload: NativeMeasurementUpdatePayload) {
@@ -586,6 +647,11 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
     }
 
     setStatus(payload.placement.message);
+
+    if (payload.placement.kind === "object-selected" && payload.placement.objectId) {
+      setSelectedPlacedObjectId(payload.placement.objectId);
+      return;
+    }
 
     if (payload.placement.object) {
       persistPlacementSnapshot(payload.placement.object);
@@ -739,6 +805,9 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   }
 
   function handleMeasurementUpdate(payload: NativeMeasurementUpdatePayload) {
+    if (payload.furnitureIdentification) {
+      setFurnitureIdentification(payload.furnitureIdentification);
+    }
     handlePlacementUpdate(payload);
     if (payload.placement) {
       return;
@@ -1020,9 +1089,79 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
         </View>
       </View>
 
-      <View style={styles.bottomPanel}>
+      <ScrollView
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        style={styles.bottomPanel}
+        contentContainerStyle={styles.bottomPanelContent}
+      >
+        <View style={styles.statusPill}>
+          <Text style={styles.statusText}>{status}</Text>
+        </View>
+
+        <View style={styles.actionRow}>
+          <Pressable
+            disabled={!canCapture}
+            onPress={handleRequestCapture}
+            style={[styles.primaryButton, !canCapture && styles.buttonDisabled]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {nextCaptureRole === "start" ? "Capture A" : "Capture B"}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() =>
+              measurementMode === "multi-capture"
+                ? clearMultiCaptureSession("Multi-Capture cleared. Aim at Point A for a new pass.")
+                : clearLiveMeasurementState(
+                    "Measurement cleared. Aim at Point A to begin another measurement.",
+                  )
+            }
+            style={styles.secondaryButton}
+          >
+            <Text style={styles.secondaryButtonText}>
+              {measurementMode === "multi-capture" ? "Cancel Session" : "Clear"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {measurementMode === "multi-capture" && !!nativeSnapshot?.endPoint ? (
+          <View style={styles.actionRow}>
+            <Pressable onPress={handlePrepareNextMultiPass} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Add Another Pass</Text>
+            </Pressable>
+
+            <Pressable
+              disabled={multiCapturePasses.length === 0}
+              onPress={() => void handleFinishMultiCapture()}
+              style={[
+                styles.secondaryButton,
+                multiCapturePasses.length === 0 && styles.buttonDisabledSecondary,
+              ]}
+            >
+              <Text style={styles.secondaryButtonText}>Finish Multi-Capture</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <View style={styles.placementPanel}>
-          <Text style={styles.sectionLabel}>AR placement</Text>
+          <View style={styles.placementHeader}>
+            <Text style={styles.sectionLabel}>Furniture & fixtures</Text>
+            <Pressable
+              accessibilityLabel="Reset room placements"
+              accessibilityRole="button"
+              disabled={activeRoomPlacedObjects.length === 0}
+              onPress={confirmClearCurrentRoomPlacements}
+              style={[
+                styles.resetButton,
+                activeRoomPlacedObjects.length === 0 && styles.buttonDisabledSecondary,
+              ]}
+            >
+              <Text style={styles.resetButtonText}>Reset room</Text>
+            </Pressable>
+          </View>
+          {furnitureIdentification ? <Text style={styles.identification}>Detected suggestion: {furnitureIdentification.label} ({Math.round(furnitureIdentification.confidence * 100)}%)</Text> : null}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1058,10 +1197,10 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.chipRow}
               >
-                {activeRoomPlacedObjects.map((object) => (
+                {activeRoomPlacedObjects.map((object, index) => (
                   <SelectionChip
-                    key={object.id}
-                    label={object.displayName}
+                    key={`${object.id}-${index}`}
+                    label={`${object.displayName} ${index + 1}`}
                     onPress={() => setSelectedPlacedObjectId(object.id)}
                     selected={object.id === selectedPlacedObjectId}
                   />
@@ -1091,13 +1230,20 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
                 </Pressable>
                 <Pressable
                   disabled={!selectedPlacedObjectId}
+                  onPress={() => requestPlacementEdit("move-to-reticle")}
+                  style={[styles.secondaryButton, !selectedPlacedObjectId && styles.buttonDisabledSecondary]}
+                >
+                  <Text style={styles.secondaryButtonText}>Move to reticle</Text>
+                </Pressable>
+                <Pressable
+                  disabled={!selectedPlacedObjectId}
                   onPress={() => requestPlacementEdit("remove")}
                   style={[
                     styles.dangerButton,
                     !selectedPlacedObjectId && styles.buttonDisabledSecondary,
                   ]}
                 >
-                  <Text style={styles.dangerButtonText}>Remove</Text>
+                  <Text style={styles.dangerButtonText}>Remove selected</Text>
                 </Pressable>
               </View>
             </>
@@ -1106,10 +1252,18 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
 
         <LiveStreamPanel
           compact
-          disabledReason="AR placement is using the phone camera. Close measurement/placement before starting the standalone customer stream."
+          roomScan={selectedRoom?.roomScan}
+          projectRooms={selectedProject?.roomCaptures.map((room) => ({ id: room.id, name: room.name, roomScan: room.roomScan }))}
+          spatialModel={selectedProject?.spatialModel}
+          layoutItems={activeRoomPlacedObjects.map((object) => ({
+            id: object.id,
+            displayName: object.displayName,
+            dimensions: object.dimensions,
+            position: object.transform.position,
+            rotationY: object.transform.rotation.yaw,
+            representation: object.representation,
+          }))}
         />
-
-        <Text style={styles.statusText}>{status}</Text>
 
         <View style={styles.selectionSection}>
           <Text style={styles.sectionLabel}>Project</Text>
@@ -1252,52 +1406,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
           </View>
         ) : null}
 
-        <View style={styles.actionRow}>
-          <Pressable
-            disabled={!canCapture}
-            onPress={handleRequestCapture}
-            style={[styles.primaryButton, !canCapture && styles.buttonDisabled]}
-          >
-            <Text style={styles.primaryButtonText}>
-              {nextCaptureRole === "start" ? "Capture A" : "Capture B"}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() =>
-              measurementMode === "multi-capture"
-                ? clearMultiCaptureSession("Multi-Capture cleared. Aim at Point A for a new pass.")
-                : clearLiveMeasurementState(
-                    "Measurement cleared. Aim at Point A to begin another measurement.",
-                  )
-            }
-            style={styles.secondaryButton}
-          >
-            <Text style={styles.secondaryButtonText}>
-              {measurementMode === "multi-capture" ? "Cancel Session" : "Clear"}
-            </Text>
-          </Pressable>
-        </View>
-
-        {measurementMode === "multi-capture" && !!nativeSnapshot?.endPoint ? (
-          <View style={styles.actionRow}>
-            <Pressable onPress={handlePrepareNextMultiPass} style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Add Another Pass</Text>
-            </Pressable>
-
-            <Pressable
-              disabled={multiCapturePasses.length === 0}
-              onPress={() => void handleFinishMultiCapture()}
-              style={[
-                styles.secondaryButton,
-                multiCapturePasses.length === 0 && styles.buttonDisabledSecondary,
-              ]}
-            >
-              <Text style={styles.secondaryButtonText}>Finish Multi-Capture</Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
+      </ScrollView>
     </View>
   );
 
@@ -1547,6 +1656,25 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
               ) : null}
 
               <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setIsOverflowMenuOpen(false);
+                  confirmClearCurrentRoomPlacements();
+                }}
+                style={styles.menuItem}
+              >
+                <Text style={styles.menuItemText}>Clear Placements</Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                onPress={clearErrorLogs}
+                style={styles.menuItem}
+              >
+                <Text style={styles.menuItemText}>Clear Error Logs</Text>
+              </Pressable>
+
+              <Pressable
                 onPress={() => {
                   setIsOverflowMenuOpen(false);
                   onClose();
@@ -1572,7 +1700,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#050505",
+    backgroundColor: colors.navy,
   },
   loadingContainer: {
     flex: 1,
@@ -1588,7 +1716,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 16,
-    backgroundColor: "#050505",
+    backgroundColor: colors.navy,
   },
   topBarActions: {
     position: "relative",
@@ -1597,13 +1725,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   eyebrow: {
-    color: "#b0b0b0",
+    color: colors.lightBlue,
     fontSize: 12,
     letterSpacing: 1.4,
     textTransform: "uppercase",
   },
   title: {
-    color: "#f5f5f5",
+    color: colors.surface,
     fontSize: 22,
     fontWeight: "700",
     marginTop: 4,
@@ -1611,15 +1739,15 @@ const styles = StyleSheet.create({
   menuButton: {
     width: 34,
     height: 34,
-    borderRadius: 17,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#d4d4d4",
-    backgroundColor: "#f7f7f7",
+    borderColor: colors.lightBlue,
+    backgroundColor: colors.surface,
   },
   menuButtonText: {
-    color: "#111111",
+    color: colors.navy,
     fontSize: 18,
     fontWeight: "800",
     lineHeight: 18,
@@ -1630,10 +1758,10 @@ const styles = StyleSheet.create({
     top: 42,
     zIndex: 20,
     minWidth: 180,
-    borderRadius: 12,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "#d4d4d4",
-    backgroundColor: "#ffffff",
+    borderColor: colors.lightBlue,
+    backgroundColor: colors.surface,
     padding: 6,
     shadowColor: "#000000",
     shadowOpacity: 0.12,
@@ -1642,32 +1770,33 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   menuItem: {
-    borderRadius: 8,
+    borderRadius: 0,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   menuItemText: {
-    color: "#111111",
+    color: colors.navy,
     fontSize: 14,
     fontWeight: "700",
   },
   closeButton: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: "#f3f3f3",
+    borderRadius: 0,
+    backgroundColor: colors.surface,
   },
   closeButtonText: {
-    color: "#101010",
+    color: colors.navy,
     fontWeight: "600",
   },
   measureContainer: {
-    flexGrow: 1,
-    paddingBottom: 18,
+    flex: 1,
+    minHeight: 0,
   },
   arContainer: {
-    minHeight: 620,
-    backgroundColor: "#050505",
+    flex: 1,
+    minHeight: 260,
+    backgroundColor: colors.navy,
     overflow: "hidden",
   },
   arView: {
@@ -1715,20 +1844,38 @@ const styles = StyleSheet.create({
     backgroundColor: "#d64545",
   },
   bottomPanel: {
+    flexGrow: 0,
+    flexShrink: 1,
+    maxHeight: 320,
+    backgroundColor: "rgba(11,35,65,0.98)",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.18)",
+  },
+  bottomPanelContent: {
     gap: 8,
-    marginTop: -230,
     paddingHorizontal: 12,
-    paddingTop: 0,
+    paddingTop: 8,
     paddingBottom: 18,
-    backgroundColor: "transparent",
   },
   statusText: {
-    color: "#f4f4f4",
-    fontSize: 15,
-    lineHeight: 20,
+    color: colors.surface,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  statusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  placementHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
   sectionLabel: {
-    color: "#b0b0b0",
+    color: colors.lightBlue,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1.1,
@@ -1741,24 +1888,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    borderRadius: 16,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.28)",
+    borderColor: colors.lightBlue,
     paddingHorizontal: 12,
     paddingVertical: 7,
-    backgroundColor: "rgba(18,18,18,0.72)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   chipSelected: {
-    borderColor: "#f0b429",
-    backgroundColor: "#2b2412",
+    borderColor: colors.lightBlue,
+    backgroundColor: "rgba(141,204,255,0.2)",
   },
   chipText: {
-    color: "#f4f4f4",
+    color: colors.surface,
     fontSize: 13,
     fontWeight: "700",
   },
   chipTextSelected: {
-    color: "#fff2cc",
+    color: colors.lightBlue,
   },
   trackingRow: {
     flexDirection: "row",
@@ -1767,42 +1914,47 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   sectionValue: {
-    color: "#f4f4f4",
+    color: colors.surface,
     fontWeight: "700",
     marginRight: 12,
   },
   measurementCard: {
-    backgroundColor: "#1b1b1b",
-    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 0,
     padding: 16,
     gap: 8,
   },
   measurementValue: {
-    color: "#ffffff",
+    color: colors.surface,
     fontSize: 34,
     fontWeight: "800",
   },
   confidenceValue: {
-    color: "#d7d7d7",
+    color: colors.lightBlue,
     fontSize: 16,
     fontWeight: "700",
   },
   cardCopy: {
-    color: "#c4c4c4",
+    color: "#d7eaff",
     fontSize: 14,
     lineHeight: 18,
+  },
+  identification: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "700",
   },
   actionRow: {
     flexDirection: "row",
     gap: 12,
   },
   placementPanel: {
-    gap: 6,
-    borderRadius: 12,
+    gap: 8,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
-    backgroundColor: "rgba(12,12,12,0.72)",
-    padding: 9,
+    borderColor: "rgba(141,204,255,0.45)",
+    backgroundColor: "rgba(11,35,65,0.82)",
+    padding: 10,
   },
   placementActions: {
     flexDirection: "row",
@@ -1810,45 +1962,57 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dangerButton: {
-    borderRadius: 14,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "#c2410c",
-    backgroundColor: "#fff7ed",
+    borderColor: "#ef4444",
+    backgroundColor: "#fee2e2",
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   dangerButtonText: {
-    color: "#9a3412",
+    color: "#991b1b",
     fontSize: 14,
     fontWeight: "700",
+  },
+  resetButton: {
+    borderRadius: 0,
+    borderWidth: 1,
+    borderColor: "#ef4444",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  resetButtonText: {
+    color: "#fecaca",
+    fontSize: 12,
+    fontWeight: "800",
   },
   primaryButton: {
     flex: 1,
     minHeight: 42,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 16,
-    backgroundColor: "#f0b429",
+    borderRadius: 0,
+    backgroundColor: colors.accent,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   primaryButtonText: {
-    color: "#050505",
+    color: colors.surface,
     fontSize: 15,
     fontWeight: "800",
   },
   secondaryButton: {
     paddingVertical: 14,
     paddingHorizontal: 14,
-    borderRadius: 14,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#4b4b4b",
-    backgroundColor: "#171717",
+    borderColor: colors.lightBlue,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   secondaryButtonText: {
-    color: "#f4f4f4",
+    color: colors.surface,
     fontWeight: "600",
   },
   buttonDisabled: {
@@ -1866,8 +2030,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logRoomCard: {
-    backgroundColor: "#161616",
-    borderRadius: 16,
+    backgroundColor: colors.card,
+    borderRadius: 0,
     padding: 16,
     gap: 12,
   },
@@ -1878,17 +2042,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   logEntry: {
-    borderRadius: 12,
-    backgroundColor: "#1f1f1f",
+    borderRadius: 0,
+    backgroundColor: colors.surface,
     padding: 14,
     gap: 4,
   },
   logEntryTitle: {
-    color: "#f4f4f4",
+    color: colors.text,
     fontWeight: "700",
   },
   logEntryValue: {
-    color: "#ffffff",
+    color: colors.navy,
     fontSize: 22,
     fontWeight: "800",
   },
@@ -1896,8 +2060,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   passRow: {
-    backgroundColor: "#1f1f1f",
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 0,
     padding: 12,
     gap: 4,
   },

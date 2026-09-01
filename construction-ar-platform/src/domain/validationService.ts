@@ -55,7 +55,7 @@ function validateCollisions(project: Project, catalogById: Map<string, CatalogOb
       const second = active[secondIndex];
       if (first.roomCaptureId !== second.roomCaptureId || !catalogById.has(first.catalogObjectId) || !catalogById.has(second.catalogObjectId)) continue;
       if (boundsOverlap(objectBounds(first), objectBounds(second))) {
-        issues.push(issue(rule.id, rule.severity, `${first.displayName} overlaps ${second.displayName}. Reposition one of the objects to remove the overlap.`, first.id, undefined, detectedAt));
+        issues.push(issue(rule.id, rule.severity, `${first.displayName} overlaps ${second.displayName}. Reposition one of the objects to remove the overlap.`, first.id, undefined, detectedAt, `${first.id}-${second.id}`));
       }
     }
   }
@@ -73,7 +73,7 @@ function validateClearances(project: Project, catalogById: Map<string, CatalogOb
     for (const otherObject of active) {
       if (otherObject.id === placedObject.id || otherObject.roomCaptureId !== placedObject.roomCaptureId) continue;
       if (boundsOverlap(clearanceBounds, objectBounds(otherObject))) {
-        issues.push(issue(rule.id, rule.severity, `${otherObject.displayName} is inside ${placedObject.displayName}'s required clearance area. Move it outside the clearance area.`, placedObject.id, undefined, detectedAt));
+        issues.push(issue(rule.id, rule.severity, `${otherObject.displayName} is inside ${placedObject.displayName}'s required clearance area. Move it outside the clearance area.`, placedObject.id, undefined, detectedAt, `${placedObject.id}-${otherObject.id}`));
       }
     }
   }
@@ -105,6 +105,14 @@ function getRule(id: string) {
   return rule;
 }
 
-function issue(ruleId: string, severity: ValidationIssue["severity"], message: string, objectId: string, surfaceId: string | undefined, detectedAt: string): ValidationIssue {
-  return { id: `${ruleId}-${objectId}-${message}`, ruleId, severity, message, objectId, surfaceId, detectedAt };
+function issue(
+  ruleId: string,
+  severity: ValidationIssue["severity"],
+  message: string,
+  objectId: string,
+  surfaceId: string | undefined,
+  detectedAt: string,
+  identity = objectId,
+): ValidationIssue {
+  return { id: `${ruleId}-${identity}`, ruleId, severity, message, objectId, surfaceId, detectedAt };
 }

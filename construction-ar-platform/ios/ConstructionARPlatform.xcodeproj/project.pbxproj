@@ -15,6 +15,10 @@
 		A1B2C3D40100000000000001 /* MeasurementARView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000011 /* MeasurementARView.swift */; };
 		A1B2C3D40100000000000002 /* MeasurementARViewManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000012 /* MeasurementARViewManager.swift */; };
 		A1B2C3D40100000000000003 /* MeasurementARViewManagerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000013 /* MeasurementARViewManagerBridge.m */; };
+		A1B2C3D40100000000000004 /* RoomScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000014 /* RoomScanView.swift */; };
+		A1B2C3D40100000000000005 /* RoomScanViewManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000015 /* RoomScanViewManager.swift */; };
+		A1B2C3D40100000000000006 /* RoomScanViewManagerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000016 /* RoomScanViewManagerBridge.m */; };
+		A1B2C3D40100000000000007 /* SavedRoom3DView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40100000000000017 /* SavedRoom3DView.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
@@ -30,6 +34,10 @@
 		A1B2C3D40100000000000011 /* MeasurementARView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MeasurementARView.swift; path = ConstructionARPlatform/MeasurementARView.swift; sourceTree = "<group>"; };
 		A1B2C3D40100000000000012 /* MeasurementARViewManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MeasurementARViewManager.swift; path = ConstructionARPlatform/MeasurementARViewManager.swift; sourceTree = "<group>"; };
 		A1B2C3D40100000000000013 /* MeasurementARViewManagerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeasurementARViewManagerBridge.m; path = ConstructionARPlatform/MeasurementARViewManagerBridge.m; sourceTree = "<group>"; };
+		A1B2C3D40100000000000014 /* RoomScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RoomScanView.swift; path = ConstructionARPlatform/RoomScanView.swift; sourceTree = "<group>"; };
+		A1B2C3D40100000000000015 /* RoomScanViewManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RoomScanViewManager.swift; path = ConstructionARPlatform/RoomScanViewManager.swift; sourceTree = "<group>"; };
+		A1B2C3D40100000000000016 /* RoomScanViewManagerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = RoomScanViewManagerBridge.m; path = ConstructionARPlatform/RoomScanViewManagerBridge.m; sourceTree = "<group>"; };
+		A1B2C3D40100000000000017 /* SavedRoom3DView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SavedRoom3DView.swift; path = ConstructionARPlatform/SavedRoom3DView.swift; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = ConstructionARPlatform/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		C7582714ADBCE95CBD0F5F81 /* Pods-ConstructionARPlatform.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ConstructionARPlatform.release.xcconfig"; path = "Target Support Files/Pods-ConstructionARPlatform/Pods-ConstructionARPlatform.release.xcconfig"; sourceTree = "<group>"; };
@@ -57,6 +65,10 @@
 				A1B2C3D40100000000000011 /* MeasurementARView.swift */,
 				A1B2C3D40100000000000012 /* MeasurementARViewManager.swift */,
 				A1B2C3D40100000000000013 /* MeasurementARViewManagerBridge.m */,
+				A1B2C3D40100000000000014 /* RoomScanView.swift */,
+				A1B2C3D40100000000000015 /* RoomScanViewManager.swift */,
+				A1B2C3D40100000000000016 /* RoomScanViewManagerBridge.m */,
+				A1B2C3D40100000000000017 /* SavedRoom3DView.swift */,
 				F11748442D0722820044C1D9 /* ConstructionARPlatform-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -363,6 +375,10 @@
 				A1B2C3D40100000000000001 /* MeasurementARView.swift in Sources */,
 				A1B2C3D40100000000000002 /* MeasurementARViewManager.swift in Sources */,
 				A1B2C3D40100000000000003 /* MeasurementARViewManagerBridge.m in Sources */,
+				A1B2C3D40100000000000004 /* RoomScanView.swift in Sources */,
+				A1B2C3D40100000000000005 /* RoomScanViewManager.swift in Sources */,
+				A1B2C3D40100000000000006 /* RoomScanViewManagerBridge.m in Sources */,
+				A1B2C3D40100000000000007 /* SavedRoom3DView.swift in Sources */,
 				104E1F9C97DEFC1E8001526C /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -380,6 +396,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H8HA49NVTT;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -420,6 +437,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H8HA49NVTT;
 				INFOPLIST_FILE = ConstructionARPlatform/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (

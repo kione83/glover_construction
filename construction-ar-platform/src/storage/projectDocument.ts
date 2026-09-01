@@ -1,14 +1,16 @@
 import type { MeasurementLogEntry } from "../domain/measurementLog";
 import type { Project } from "../domain/projects";
+import type { ScanMeasurementLogEntry } from "../domain/scanMeasurementLog";
 
 export const PROJECT_DOCUMENT_KIND = "construction-ar-project";
-export const PROJECT_SCHEMA_VERSION = 2;
+export const PROJECT_SCHEMA_VERSION = 5;
 
 export interface ProjectDocument {
   kind: typeof PROJECT_DOCUMENT_KIND;
   schemaVersion: number;
   project: Project;
   measurementLogEntries: MeasurementLogEntry[];
+  scanMeasurementLogEntries: ScanMeasurementLogEntry[];
 }
 
 export function createEmptyProjectDocument(
@@ -20,6 +22,7 @@ export function createEmptyProjectDocument(
     kind: PROJECT_DOCUMENT_KIND,
     schemaVersion: PROJECT_SCHEMA_VERSION,
     measurementLogEntries: [],
+    scanMeasurementLogEntries: [],
     project: {
       id: overrides.id,
       name: overrides.name,
@@ -36,6 +39,13 @@ export function createEmptyProjectDocument(
       roomCaptures: overrides.roomCaptures ?? [],
       anchors: overrides.anchors ?? [],
       placedObjects: overrides.placedObjects ?? [],
+      photos: overrides.photos ?? [],
+      fieldNotes: overrides.fieldNotes ?? [],
+      spatialModel: overrides.spatialModel ?? {
+        coordinateSystem: "project-local",
+        roomTransforms: {},
+        connections: [],
+      },
       validationIssues: overrides.validationIssues ?? [],
       summary:
         overrides.summary ?? {
@@ -63,11 +73,29 @@ export function hydrateProjectDocument(document: unknown): ProjectDocument | nul
     kind: PROJECT_DOCUMENT_KIND,
     schemaVersion:
       typeof candidate.schemaVersion === "number"
-        ? candidate.schemaVersion
+        ? Math.max(candidate.schemaVersion, PROJECT_SCHEMA_VERSION)
         : PROJECT_SCHEMA_VERSION,
-    project: candidate.project,
+    project: {
+      ...candidate.project,
+      photos: candidate.project.photos ?? [],
+      fieldNotes: candidate.project.fieldNotes ?? [],
+      spatialModel: candidate.project.spatialModel ?? {
+        coordinateSystem: "project-local",
+        roomTransforms: Object.fromEntries(
+          (candidate.project.roomCaptures ?? []).map((room) => [room.id, {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { pitch: 0, yaw: 0, roll: 0 },
+            scale: { x: 1, y: 1, z: 1 },
+          }]),
+        ),
+        connections: [],
+      },
+    },
     measurementLogEntries: Array.isArray(candidate.measurementLogEntries)
       ? candidate.measurementLogEntries
+      : [],
+    scanMeasurementLogEntries: Array.isArray(candidate.scanMeasurementLogEntries)
+      ? candidate.scanMeasurementLogEntries
       : [],
   };
 }

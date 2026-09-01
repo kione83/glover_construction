@@ -2,6 +2,7 @@ export * from "./catalog";
 export * from "./measurementConfidence";
 export * from "./measurementCsv";
 export * from "./measurementLog";
+export * from "./scanMeasurementLog";
 export * from "./measurements";
 export * from "./measurementUnits";
 export * from "./projects";

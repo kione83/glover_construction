@@ -2,6 +2,7 @@ import ARKit
 import Foundation
 import React
 import SceneKit
+import Vision
 import simd
 
 @objcMembers
@@ -131,6 +132,8 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
   private var lastReticleSignature = ""
   private var lastTrackingSignature = ""
   private var lastTelemetryAt = Date.distantPast
+  private var lastFurnitureClassificationAt = Date.distantPast
+  private var latestFurnitureIdentification: [String: Any]?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -166,7 +169,26 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     sceneView.autoenablesDefaultLighting = true
     sceneView.automaticallyUpdatesLighting = true
     sceneView.scene = SCNScene()
+    let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleSceneTap(_:)))
+    sceneView.addGestureRecognizer(tapRecognizer)
     addSubview(sceneView)
+  }
+
+  @objc private func handleSceneTap(_ recognizer: UITapGestureRecognizer) {
+    guard recognizer.state == .ended else { return }
+    let location = recognizer.location(in: sceneView)
+    guard let hitNode = sceneView.hitTest(location, options: nil).first?.node else { return }
+
+    var node: SCNNode? = hitNode
+    while let candidate = node {
+      if let objectId = candidate.name, placementNodesById[objectId] != nil {
+        selectedPlacedObjectId = objectId as NSString
+        let displayName = placementSnapshotsById[objectId]?["displayName"] as? String ?? "Object"
+        emitPlacement(kind: "object-selected", message: "\(displayName) selected.", objectId: objectId)
+        return
+      }
+      node = candidate.parent
+    }
   }
 
   private func startSession() {
@@ -249,6 +271,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
   func session(_ session: ARSession, didUpdate frame: ARFrame) {
     currentTracking = trackingSnapshot(from: frame.camera.trackingState)
     latestReticleTarget = resolveDepthNeighborhoodTarget(frame: frame) ?? resolveCenterTarget(frame: frame)
+    classifyFurnitureIfNeeded(frame: frame)
     processPendingCapture(with: frame)
     emitTrackingUpdateIfNeeded()
   }
@@ -437,8 +460,34 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     if let measurement = measurementPayload() {
       payload["measurement"] = measurement
     }
+    if let latestFurnitureIdentification {
+      payload["furnitureIdentification"] = latestFurnitureIdentification
+    }
 
     onMeasurementUpdate(payload)
+  }
+
+  private func classifyFurnitureIfNeeded(frame: ARFrame) {
+    let now = Date()
+    guard now.timeIntervalSince(lastFurnitureClassificationAt) >= 1.2 else { return }
+    lastFurnitureClassificationAt = now
+
+    let request = VNClassifyImageRequest { [weak self] request, _ in
+      guard let self,
+            let observations = request.results as? [VNClassificationObservation] else { return }
+      let furnitureKeywords = ["chair", "couch", "sofa", "table", "bed", "desk", "cabinet", "shelf", "dresser", "bench"]
+      guard let match = observations.first(where: { observation in
+        furnitureKeywords.contains(where: { observation.identifier.lowercased().contains($0) })
+      }) else { return }
+      self.latestFurnitureIdentification = [
+        "label": match.identifier,
+        "confidence": match.confidence,
+        "capturedAt": self.timestampFormatter.string(from: Date())
+      ]
+    }
+
+    let handler = VNImageRequestHandler(cvPixelBuffer: frame.capturedImage, orientation: .right)
+    try? handler.perform([request])
   }
 
   private func measurementPayload() -> [String: Any]? {
@@ -898,7 +947,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       return
     }
 
-    let id = "placement-\(Int(Date().timeIntervalSince1970 * 1000))"
+    let id = "placement-\(requestId)-\(Int(Date().timeIntervalSince1970 * 1000))"
     let snapshot = placementSnapshot(
       id: id,
       catalogObjectId: catalogObjectId,
@@ -906,7 +955,8 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       placementMode: placementMode,
       dimensions: dimensions,
       point: target.point,
-      rotationY: 0
+      rotationY: 0,
+      representation: request["representation"] as? String
     )
 
     upsertPlacementNode(snapshot)
@@ -923,6 +973,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
 
     guard let objectId = request["objectId"] as? String,
           let action = request["action"] as? String else { return }
+    guard var snapshot = placementSnapshotsById[objectId] else { return }
 
     if action == "remove" {
       placementNodesById[objectId]?.removeFromParentNode()
@@ -932,7 +983,18 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       return
     }
 
-    guard var snapshot = placementSnapshotsById[objectId] else { return }
+    if action == "move-to-reticle" {
+      guard let target = latestReticleTarget else {
+        emitPlacement(kind: "placement-failed", message: "Aim at a tracked surface before moving the selected object.")
+        return
+      }
+      snapshot["position"] = ["x": target.point.x, "y": target.point.y, "z": target.point.z]
+      placementSnapshotsById[objectId] = snapshot
+      upsertPlacementNode(snapshot)
+      emitPlacement(kind: "object-updated", message: "Object moved to the reticle.", object: snapshot)
+      return
+    }
+
     let currentRotation = numberValue(snapshot["rotationY"])?.floatValue ?? 0
     let delta: Float = action == "rotate-left" ? -.pi / 12 : .pi / 12
     snapshot["rotationY"] = currentRotation + delta
@@ -969,17 +1031,11 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     let width = CGFloat(numberValue(dimensions["width"])?.doubleValue ?? 0.2)
     let height = CGFloat(numberValue(dimensions["height"])?.doubleValue ?? 0.2)
     let depth = CGFloat(numberValue(dimensions["depth"])?.doubleValue ?? 0.08)
-    let box = SCNBox(
-      width: max(width, 0.02),
-      height: max(height, 0.02),
-      length: max(depth, 0.02),
-      chamferRadius: 0.006
-    )
-    box.firstMaterial?.diffuse.contents = UIColor.systemTeal.withAlphaComponent(0.78)
-    box.firstMaterial?.emission.contents = UIColor.systemTeal.withAlphaComponent(0.08)
-
     let node = placementNodesById[id] ?? SCNNode()
-    node.geometry = box
+    node.childNodes.forEach { $0.removeFromParentNode() }
+    node.geometry = nil
+    let representation = snapshot["representation"] as? String ?? "generic-object"
+    node.addChildNode(makePlacementGeometry(representation: representation, width: width, height: height, depth: depth))
     node.name = id
     node.position = SCNVector3(
       Float(numberValue(position["x"])?.doubleValue ?? 0),
@@ -1012,9 +1068,10 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     placementMode: String,
     dimensions: NSDictionary,
     point: SIMD3<Float>,
-    rotationY: Float
+    rotationY: Float,
+    representation: String?
   ) -> [String: Any] {
-    [
+    var result: [String: Any] = [
       "id": id,
       "catalogObjectId": catalogObjectId,
       "displayName": displayName,
@@ -1031,6 +1088,44 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       ],
       "rotationY": rotationY
     ]
+    if let representation { result["representation"] = representation }
+    return result
+  }
+
+  private func makePlacementGeometry(representation: String, width: CGFloat, height: CGFloat, depth: CGFloat) -> SCNNode {
+    let root = SCNNode()
+    let blue = UIColor.systemBlue.withAlphaComponent(0.82)
+    let darkBlue = UIColor.systemIndigo.withAlphaComponent(0.82)
+    func part(_ width: CGFloat, _ height: CGFloat, _ length: CGFloat, _ position: SCNVector3, _ material: UIColor = blue) -> SCNNode {
+      let box = SCNBox(width: max(width, 0.02), height: max(height, 0.02), length: max(length, 0.02), chamferRadius: 0.006)
+      box.firstMaterial?.diffuse.contents = material
+      box.firstMaterial?.emission.contents = material.withAlphaComponent(0.08)
+      let node = SCNNode(geometry: box)
+      node.position = position
+      return node
+    }
+    switch representation {
+    case "sofa":
+      root.addChildNode(part(width, height * 0.32, depth * 0.7, SCNVector3(0, -height * 0.22, 0)))
+      root.addChildNode(part(width, height * 0.55, depth * 0.18, SCNVector3(0, height * 0.05, -depth * 0.38), darkBlue))
+      root.addChildNode(part(width * 0.1, height * 0.45, depth * 0.7, SCNVector3(-width * 0.45, -height * 0.02, 0), darkBlue))
+      root.addChildNode(part(width * 0.1, height * 0.45, depth * 0.7, SCNVector3(width * 0.45, -height * 0.02, 0), darkBlue))
+    case "chair":
+      root.addChildNode(part(width, height * 0.24, depth, SCNVector3(0, -height * 0.25, 0)))
+      root.addChildNode(part(width * 0.85, height * 0.7, depth * 0.18, SCNVector3(0, height * 0.1, -depth * 0.4), darkBlue))
+    case "table":
+      root.addChildNode(part(width, height * 0.16, depth, SCNVector3(0, height * 0.3, 0)))
+      for x in [-width * 0.4, width * 0.4] { for z in [-depth * 0.4, depth * 0.4] { root.addChildNode(part(width * 0.08, height * 0.6, depth * 0.08, SCNVector3(x, -height * 0.05, z), darkBlue)) } }
+    case "bed":
+      root.addChildNode(part(width, height * 0.35, depth, SCNVector3(0, -height * 0.2, 0)))
+      root.addChildNode(part(width * 0.88, height * 0.18, depth * 0.18, SCNVector3(0, height * 0.05, -depth * 0.36), UIColor.systemGray.withAlphaComponent(0.8)))
+    case "cabinet":
+      root.addChildNode(part(width, height, depth, SCNVector3(0, 0, 0)))
+      root.addChildNode(part(width * 0.04, height * 0.85, depth * 0.04, SCNVector3(0, 0, depth * 0.51), darkBlue))
+    default:
+      root.addChildNode(part(width, height, depth, SCNVector3(0, 0, 0)))
+    }
+    return root
   }
 
   private func emitPlacement(

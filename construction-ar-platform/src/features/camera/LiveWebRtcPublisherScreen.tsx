@@ -23,6 +23,7 @@ import { colors } from "../../theme/colors";
 
 interface LiveWebRtcPublisherScreenProps {
   onClose: () => void;
+  onClearPlacements: () => void;
 }
 
 type SignalMessage =
@@ -74,7 +75,7 @@ function normalizeSignalServerUrl(input: string): { url?: string; error?: string
   }
 }
 
-export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreenProps) {
+export function LiveWebRtcPublisherScreen({ onClose, onClearPlacements }: LiveWebRtcPublisherScreenProps) {
   const [serverUrl, setServerUrl] = useState(process.env.EXPO_PUBLIC_SIGNALING_URL ?? "");
   const [room, setRoom] = useState(DEFAULT_ROOM);
   const [status, setStatus] = useState("Enter your laptop's signaling URL.");
@@ -211,6 +212,7 @@ export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreen
           <View style={styles.actions}>
             <Pressable style={styles.primaryButton} onPress={connect}><Text style={styles.primaryButtonText}>Connect phone</Text></Pressable>
             <Pressable style={styles.secondaryButton} onPress={stopPublishing}><Text style={styles.secondaryButtonText}>Stop</Text></Pressable>
+            <Pressable style={styles.secondaryButton} onPress={onClearPlacements}><Text style={styles.secondaryButtonText}>Reset room</Text></Pressable>
             <Pressable style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Close</Text></Pressable>
           </View>
         </View>
@@ -220,17 +222,17 @@ export function LiveWebRtcPublisherScreen({ onClose }: LiveWebRtcPublisherScreen
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#101010", justifyContent: "flex-end" },
+  screen: { flex: 1, backgroundColor: colors.navy, justifyContent: "flex-end" },
   previewPlaceholder: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", padding: 36 },
   previewText: { color: "#ddd", fontSize: 16, lineHeight: 24, textAlign: "center" },
   scrollContent: { flexGrow: 1, justifyContent: "flex-end", padding: 20 },
-  panel: { padding: 18, gap: 12, borderRadius: 18, backgroundColor: "rgba(0, 0, 0, 0.72)" },
+  panel: { padding: 18, gap: 12, borderRadius: 0, backgroundColor: "rgba(11, 35, 65, 0.94)" },
   title: { color: "#fff", fontSize: 22, fontWeight: "800" },
   copy: { color: "#eee", fontSize: 14, lineHeight: 20 },
-  input: { color: "#fff", backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.5)", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11 },
+  input: { color: "#fff", backgroundColor: "rgba(255,255,255,0.14)", borderColor: colors.lightBlue, borderWidth: 1, borderRadius: 0, paddingHorizontal: 12, paddingVertical: 11 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   primaryButton: { backgroundColor: colors.accent, borderRadius: 10, paddingHorizontal: 13, paddingVertical: 11 },
   primaryButtonText: { color: "#fff", fontWeight: "800" },
-  secondaryButton: { borderColor: "#fff", borderWidth: 1, borderRadius: 10, paddingHorizontal: 13, paddingVertical: 11 },
+  secondaryButton: { borderColor: colors.lightBlue, borderWidth: 1, borderRadius: 0, paddingHorizontal: 13, paddingVertical: 11 },
   secondaryButtonText: { color: "#fff", fontWeight: "800" },
 });

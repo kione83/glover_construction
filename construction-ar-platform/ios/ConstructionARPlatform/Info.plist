@@ -53,7 +53,7 @@
 		<string>_expo._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Allow Construction AR Platform to use the camera for live project viewing.</string>
+	<string>Allow Construction AR Platform to use the camera for Room Scan and live project viewing.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Expo Dev Launcher uses the local network to discover and connect to development servers running on your computer.</string>
 	<key>NSMicrophoneUsageDescription</key>
