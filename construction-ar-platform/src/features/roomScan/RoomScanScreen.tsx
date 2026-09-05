@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import {
   Alert,
@@ -13,7 +13,8 @@ import {
 } from "react-native";
 
 import { addRoomToSpatialModel, buildScanMeasurementCsv, createScanMeasurementLogEntries, updateProjectSummary, type Project, type RoomCapture, type RoomScanData } from "../../domain";
-import { loadProjectDocuments, saveProjectDocuments } from "../../storage/projectRepository";
+import { loadProjectDocuments, loadProjectScan, saveProjectDocuments } from "../../storage/projectRepository";
+import { summarizeProjectScans } from "../../storage/projectDocument";
 import { colors } from "../../theme/colors";
 import { LiveStreamPanel } from "../camera/LiveStreamPanel";
 import {
@@ -88,9 +89,11 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
   const [isFinished, setIsFinished] = useState(false);
   const [scan, setScan] = useState<RoomScanData>();
   const [savedRoomId, setSavedRoomId] = useState<string>();
+  const [savedRoomSummary, setSavedRoomSummary] = useState<{ wallCount: number; contentCount: number; ceilingHeight?: number }>();
   const [showMeasurements, setShowMeasurements] = useState(false);
   const [showMeasurementList, setShowMeasurementList] = useState(false);
   const [liveMeasurements, setLiveMeasurements] = useState<NativeRoomScanMeasurement[]>([]);
+  const completionHandledRef = useRef(false);
 
   useEffect(() => {
     void loadProjectDocuments().then((documents) => {
@@ -159,8 +162,17 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
         : document,
     );
     await saveProjectDocuments(updatedDocuments);
-    setProject(updatedProject);
+    // The archive is now durable on the device. Keep only the project index in
+    // this screen so closing/reopening a scan does not retain its heavy payload.
+    setProject(summarizeProjectScans(updatedProject));
     setSavedRoomId(room.id);
+    setSavedRoomSummary({
+      wallCount: completedScan.elements.filter((element) => element.kind === "wall").length,
+      contentCount: completedScan.elements.filter((element) => ["furniture", "built-in", "fixture"].includes(element.kind)).length,
+      ceilingHeight: completedScan.ceilingHeight,
+    });
+    setScan(undefined);
+    setLiveMeasurements([]);
     setStatus("Room Scan saved to this project. The room can be reconstructed without scanning again.");
     setIsFinished(true);
   }
@@ -171,10 +183,12 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
     if (typeof update.progress === "number") setProgress(update.progress);
     if (update.measurements) setLiveMeasurements(update.measurements);
     if (update.kind === "scan-failed" || update.kind === "session-unsupported") {
+      completionHandledRef.current = true;
       setIsFinished(true);
       return;
     }
-    if (update.kind === "scan-completed" && update.scan) {
+    if (update.kind === "scan-completed" && update.scan && !completionHandledRef.current) {
+      completionHandledRef.current = true;
       const completedScan: RoomScanData = {
         version: 1,
         source: "roomplan",
@@ -197,10 +211,11 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
   }
 
   async function exportScanMeasurements() {
-    if (!scan) return;
+    if (!savedRoomId) return;
+    const savedScan = await loadProjectScan(projectId, savedRoomId);
+    if (!savedScan) return;
     const projectIdValue = project?.id ?? projectId;
-    const roomId = savedRoomId ?? "room-scan";
-    const entries = createScanMeasurementLogEntries(projectIdValue, roomId, scan);
+    const entries = createScanMeasurementLogEntries(projectIdValue, savedRoomId, savedScan);
     const csv = buildScanMeasurementCsv(entries);
     if (!csv) {
       Alert.alert("No scan measurements", "No estimated measurements were returned by the scan.");
@@ -282,12 +297,11 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
             </View>
           </View>
         )}
-        {scan && (
+        {savedRoomSummary && (
           <View style={styles.summary}>
             <Text style={styles.summaryTitle}>Saved room model</Text>
-            <Text style={styles.summaryText}>{scan.elements.filter((element) => element.kind === "wall").length} walls · {layoutItems.length} contents · {scan.ceilingHeight ? `${scan.ceilingHeight.toFixed(2)} m ceiling` : "ceiling height unavailable"}</Text>
+            <Text style={styles.summaryText}>{savedRoomSummary.wallCount} walls · {savedRoomSummary.contentCount} contents · {savedRoomSummary.ceilingHeight ? `${savedRoomSummary.ceilingHeight.toFixed(2)} m ceiling` : "ceiling height unavailable"}</Text>
             <Pressable style={styles.button} onPress={() => void exportScanMeasurements()}><Text style={styles.buttonText}>Export scan estimates</Text></Pressable>
-            <LiveStreamPanel compact layoutItems={layoutItems} projectRooms={project?.roomCaptures.map((room) => ({ id: room.id, name: room.name, roomScan: room.roomScan }))} roomScan={scan} spatialModel={project?.spatialModel} />
           </View>
         )}
         {isFinished && <Pressable style={styles.button} onPress={onClose}><Text style={styles.buttonText}>Back to project</Text></Pressable>}

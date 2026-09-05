@@ -18,6 +18,7 @@
     "expo": "~57.0.16",
     "expo-camera": "~57.0.4",
     "expo-dev-client": "~57.0.15",
+    "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.5",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",

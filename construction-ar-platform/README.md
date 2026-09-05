@@ -39,6 +39,13 @@ From a selected project, choose **Capture photo** to save a site photo to the
 project. Use the **Field notes** form to record dated observations. Both are
 stored in the local project document and restored when the project is reopened.
 
+Use **Import floor plan / blueprint** to attach an image or PDF reference to the
+selected project. Image plans are previewed in the workspace; PDF plans remain
+available as document references. **Share layout summary** creates a concise
+handoff containing rooms, placed objects, plan references, validation issues,
+photos, and notes. The summary states that MVP measurements are for planning
+visualization and are not survey-grade.
+
 ## Room Scan
 
 On a supported LiDAR iPhone running iOS 16 or later, choose **Scan Room** in a

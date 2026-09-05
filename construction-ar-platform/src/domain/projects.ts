@@ -166,6 +166,9 @@ export interface RoomScanData {
   nativeCapturedRoomJSON?: string;
   /** Bounded ARKit scene-reconstruction mesh for irregular architecture such as stairs. */
   arkitMesh?: RoomScanMeshData;
+  /** Durable Documents-directory archive containing the complete scan payload. */
+  archiveUri?: string;
+  archiveSizeBytes?: number;
   portal: {
     format: "construction-ar-room-scan";
     version: 1;
@@ -283,6 +286,15 @@ export interface ProjectFieldNote {
   createdAt: string;
 }
 
+export interface ProjectBlueprintReference {
+  id: string;
+  name: string;
+  uri: string;
+  mimeType?: string;
+  size?: number;
+  importedAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -297,6 +309,7 @@ export interface Project {
   placedObjects: PlacedObject[];
   photos: ProjectPhoto[];
   fieldNotes: ProjectFieldNote[];
+  blueprints: ProjectBlueprintReference[];
   spatialModel?: ProjectSpatialModel;
   validationIssues: ValidationIssue[];
   summary: ProjectSummary;

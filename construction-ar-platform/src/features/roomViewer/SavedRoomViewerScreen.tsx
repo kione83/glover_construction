@@ -38,7 +38,11 @@ function modelFor(project: Project, mode: SavedRoomViewerMode, roomId?: string, 
     .map((room) => ({
       id: room.id,
       name: room.name,
-      roomScan: room.roomScan,
+      // Native archive JSON is persisted separately and is not render input.
+      // Omitting it prevents a second large JS/native copy of every scan.
+      roomScan: room.roomScan
+        ? (({ nativeCapturedRoomJSON: _nativeCapturedRoomJSON, ...renderScan }) => renderScan)(room.roomScan)
+        : undefined,
       transform: transforms?.[room.id] ?? roomTransform(project, room.id),
     }));
   return JSON.stringify({ projectId: project.id, mode, rooms });
@@ -66,23 +70,36 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose, onOpen
   const [roomBId, setRoomBId] = useState("");
   const [featureAId, setFeatureAId] = useState("");
   const [featureBId, setFeatureBId] = useState("");
-  const [showMeasurements, setShowMeasurements] = useState(true);
+  const [showMeasurements, setShowMeasurements] = useState(false);
   const [resetRequestId, setResetRequestId] = useState(0);
 
   useEffect(() => {
-    void loadProjectDocuments().then((documents) => {
-      const loaded = documents.find((document) => document.project.id === projectId)?.project;
-      if (!loaded) return;
-      setProject(loaded);
-      const transforms = Object.fromEntries(loaded.roomCaptures.map((room) => [room.id, roomTransform(loaded, room.id)]));
+    let cancelled = false;
+    void (async () => {
+      // Load the index first, then only the archives required by this viewer.
+      const metadataDocuments = await loadProjectDocuments({ includeScans: false });
+      const metadataProject = metadataDocuments.find((document) => document.project.id === projectId)?.project;
+      if (!metadataProject || cancelled) return;
+      const transforms = Object.fromEntries(metadataProject.roomCaptures.map((room) => [room.id, roomTransform(metadataProject, room.id)]));
+      const scanRooms = metadataProject.roomCaptures.filter((room) => room.roomScan);
+      const defaultRoomA = scanRooms.find((room) => room.id !== roomId)?.id ?? scanRooms[0]?.id ?? metadataProject.roomCaptures[0]?.id ?? "";
+      const defaultRoomB = mode === "alignment" && roomId ? roomId : scanRooms.find((room) => room.id !== defaultRoomA)?.id ?? scanRooms[1]?.id ?? metadataProject.roomCaptures[1]?.id ?? "";
+      const roomsToLoad = mode === "project"
+        ? scanRooms.map((room) => room.id)
+        : mode === "room"
+          ? [roomId ?? defaultRoomA].filter(Boolean)
+          : [defaultRoomA, defaultRoomB].filter(Boolean);
+      setProject(metadataProject);
       setDraftTransforms(transforms);
-      const scanRooms = loaded.roomCaptures.filter((room) => room.roomScan);
-      const defaultRoomA = scanRooms.find((room) => room.id !== roomId)?.id ?? scanRooms[0]?.id ?? loaded.roomCaptures[0]?.id ?? "";
-      const defaultRoomB = mode === "alignment" && roomId ? roomId : scanRooms.find((room) => room.id !== defaultRoomA)?.id ?? scanRooms[1]?.id ?? loaded.roomCaptures[1]?.id ?? "";
       setRoomAId(defaultRoomA);
       setRoomBId(defaultRoomB);
-      setSelectedRoomId(roomId ?? scanRooms[0]?.id ?? loaded.roomCaptures[0]?.id);
-    });
+      setSelectedRoomId(roomId ?? scanRooms[0]?.id ?? metadataProject.roomCaptures[0]?.id);
+
+      const fullDocuments = await loadProjectDocuments({ includeScans: true, projectId, roomIds: roomsToLoad });
+      const fullProject = fullDocuments.find((document) => document.project.id === projectId)?.project;
+      if (!cancelled && fullProject) setProject(fullProject);
+    })();
+    return () => { cancelled = true; };
   }, [projectId, roomId, mode]);
 
   const roomA = project?.roomCaptures.find((room) => room.id === roomAId);

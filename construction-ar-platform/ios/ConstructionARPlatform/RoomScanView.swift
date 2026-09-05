@@ -94,6 +94,8 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   private weak var roomPlanARSessionDelegate: ARSessionDelegate?
   private weak var observedARSession: ARSession?
   private var annotationDisplayLink: CADisplayLink?
+  private var processingTask: Task<Void, Never>?
+  private var lastMiniatureSignature = ""
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -126,6 +128,7 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     } else {
       annotationDisplayLink?.invalidate()
       annotationDisplayLink = nil
+      if didStart || didFinish { releaseCaptureResources() }
     }
   }
 
@@ -209,12 +212,15 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     didFinish = false
     lastProgress = 0
     scanUpdateCount = 0
+    annotationSceneView.rendersContinuously = true
+    miniatureSceneView.rendersContinuously = true
     measurementStates.removeAll()
     meshStates.removeAll()
     wallIds.removeAll()
     nextWallNumber = 1
     measurementAnnotationNodes.removeAll()
     annotationRootNode.childNodes.forEach { $0.removeFromParentNode() }
+    lastMiniatureSignature = ""
     var configuration = RoomCaptureSession.Configuration()
     configuration.isCoachingEnabled = true
     captureView.captureSession.run(configuration: configuration)
@@ -244,6 +250,7 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   func captureView(shouldPresent roomDataForProcessing: CapturedRoomData, error: Error?) -> Bool {
     if let error {
       emit(kind: "scan-failed", message: error.localizedDescription)
+      releaseCaptureResources()
       return false
     }
     return true
@@ -270,15 +277,21 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
     if let error {
       emit(kind: "scan-failed", message: error.localizedDescription)
+      releaseCaptureResources()
       return
     }
 
-    Task { @MainActor in
+    processingTask = Task { @MainActor [weak self] in
       do {
         let room = try await RoomBuilder(options: []).capturedRoom(from: data)
-        emit(kind: "scan-completed", message: "Room Scan complete.", progress: 1, scan: serialize(room))
+        guard !Task.isCancelled, let self else { return }
+        self.emit(kind: "scan-completed", message: "Room Scan complete.", progress: 1, scan: self.serialize(room))
+        self.releaseCaptureResources()
       } catch {
-        emit(kind: "scan-failed", message: "Room Scan could not be processed: \(error.localizedDescription)")
+        if !Task.isCancelled, let self {
+          self.emit(kind: "scan-failed", message: "Room Scan could not be processed: \(error.localizedDescription)")
+          self.releaseCaptureResources()
+        }
       }
     }
   }
@@ -298,10 +311,36 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     session.delegate = self
   }
 
-  deinit {
+  private func releaseCaptureResources() {
+    annotationDisplayLink?.invalidate()
+    annotationDisplayLink = nil
+    processingTask?.cancel()
+    processingTask = nil
     if let observedARSession, observedARSession.delegate === self {
       observedARSession.delegate = roomPlanARSessionDelegate
     }
+    observedARSession?.pause()
+    roomCaptureView?.captureSession.stop()
+    roomCaptureView?.captureSession.delegate = nil
+    roomCaptureView?.delegate = nil
+    roomCaptureView?.captureSession.arSession.pause()
+    roomCaptureView?.removeFromSuperview()
+    roomCaptureView = nil
+    roomPlanARSessionDelegate = nil
+    observedARSession = nil
+    measurementAnnotationNodes.removeAll()
+    annotationRootNode.childNodes.forEach { $0.removeFromParentNode() }
+    miniatureRootNode.childNodes.forEach { $0.removeFromParentNode() }
+    measurementStates.removeAll()
+    meshStates.removeAll()
+    wallIds.removeAll()
+    lastMiniatureSignature = ""
+    annotationSceneView.rendersContinuously = false
+    miniatureSceneView.rendersContinuously = false
+  }
+
+  deinit {
+    releaseCaptureResources()
   }
 
   @available(iOS 11.0, *)
@@ -415,8 +454,8 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     else { ordered = ["width", "height", "depth"] }
     let entries = ordered.compactMap { byDimension[$0].map { String(format: "%.2f", $0) } }
     guard !entries.isEmpty else { return "" }
-    let prefix = kind == "wall" ? "\((values.first?["wallId"] as? String) ?? "Wall") — " : ""
-    return prefix + entries.joined(separator: " × ") + " m"
+    let prefix = kind == "wall" ? "\((values.first?["wallId"] as? String) ?? "Wall") " : ""
+    return prefix + entries.joined(separator: " × ") + "m"
   }
 
   private func makeMeasurementAnnotation(text: String) -> SCNNode {
@@ -456,8 +495,14 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
       textGeometry.string = text
       centerTextPivot(textNode)
       let (minBounds, maxBounds) = textGeometry.boundingBox
-      let physicalWidth = max((maxBounds.x - minBounds.x) * 0.01 + 0.06, 0.12)
-      let physicalHeight = max((maxBounds.y - minBounds.y) * 0.01 + 0.04, 0.07)
+      let rawWidth = maxBounds.x - minBounds.x
+      let rawHeight = maxBounds.y - minBounds.y
+      // SCNText is authored in point-sized units. Bound the physical label to
+      // a small annotation card so labels cannot cover a scanned wall.
+      let textScale = min(0.006, max(0.0025, 0.30 / max(rawWidth, 1)))
+      textNode.scale = SCNVector3(textScale, textScale, textScale)
+      let physicalWidth = min(max(rawWidth * textScale + 0.035, 0.08), 0.36)
+      let physicalHeight = min(max(rawHeight * textScale + 0.025, 0.045), 0.07)
       if let backing = node.childNode(withName: "measurement-backing", recursively: false) {
         backing.geometry = SCNPlane(width: CGFloat(physicalWidth), height: CGFloat(physicalHeight))
         backing.geometry?.firstMaterial = backing.geometry?.firstMaterial ?? {
@@ -513,6 +558,15 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   }
 
   private func updateMiniatureModel(for room: CapturedRoom) {
+    let signature = ([
+      room.walls.map { $0.identifier.uuidString },
+      room.doors.map { $0.identifier.uuidString },
+      room.windows.map { $0.identifier.uuidString },
+      room.openings.map { $0.identifier.uuidString },
+      room.objects.map { $0.identifier.uuidString },
+    ].flatMap { $0 }).joined(separator: "|")
+    guard signature != lastMiniatureSignature else { return }
+    lastMiniatureSignature = signature
     miniatureRootNode.childNodes.forEach { $0.removeFromParentNode() }
     for wall in room.walls { addMiniatureElement(transform: wall.transform, dimensions: wall.dimensions, kind: "wall") }
     for surface in room.doors + room.windows + room.openings { addMiniatureElement(transform: surface.transform, dimensions: surface.dimensions, kind: surfaceCategory(surface.category)) }

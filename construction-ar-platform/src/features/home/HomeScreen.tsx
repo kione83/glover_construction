@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   ActivityIndicator,
   Alert,
   Image,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -11,6 +14,7 @@ import {
 } from "react-native";
 
 import { starterCatalog } from "../../domain/catalog";
+import { buildProjectShareText } from "../../domain/projectReport";
 import {
   addRoomToSpatialModel,
   clearSavedRoomScansFromProject,
@@ -22,6 +26,7 @@ import {
   type RoomCapture,
   type RoomConnectionType,
 } from "../../domain/projects";
+import type { ProjectBlueprintReference } from "../../domain/projects";
 import { defaultValidationRules } from "../../domain/validation";
 import { validateProject } from "../../domain/validationService";
 import { createEmptyProjectDocument, updateProjectSummary } from "../../storage/projectDocument";
@@ -165,6 +170,45 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
     if (!selectedProject) return;
     const photo = { id: `photo-${Date.now()}`, uri, capturedAt: new Date().toISOString() };
     await updateSelectedProject((project) => ({ ...project, photos: [photo, ...project.photos] }));
+  }
+
+  async function importBlueprint() {
+    if (!selectedProject) return;
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["image/*", "application/pdf"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const asset = result.assets[0];
+    const blueprint: ProjectBlueprintReference = {
+      id: `blueprint-${Date.now()}`,
+      name: asset.name,
+      uri: asset.uri,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      importedAt: new Date().toISOString(),
+    };
+    await updateSelectedProject((project) => ({
+      ...project,
+      blueprints: [blueprint, ...project.blueprints],
+    }));
+  }
+
+  async function shareProjectSummary() {
+    if (!selectedProject) return;
+    const directory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+    if (!directory) return;
+    const uri = `${directory}${selectedProject.id}-layout-summary.txt`;
+    await FileSystem.writeAsStringAsync(uri, buildProjectShareText(selectedProject), {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    await Share.share({
+      url: uri,
+      title: `${selectedProject.name} layout summary`,
+      message: buildProjectShareText(selectedProject),
+    });
   }
 
   function clearSelectedRoomPlacements() {
@@ -429,12 +473,12 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
         </View>
       </View>
 
-      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera((uri) => void addProjectPhoto(uri), clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={onOpenMeasure} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} fieldNoteText={fieldNoteText} onFieldNoteTextChange={setFieldNoteText} onAddFieldNote={() => void addFieldNote()} />}
+      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera((uri) => void addProjectPhoto(uri), clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={onOpenMeasure} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} fieldNoteText={fieldNoteText} onFieldNoteTextChange={setFieldNoteText} onAddFieldNote={() => void addFieldNote()} onImportBlueprint={() => void importBlueprint()} onShareProjectSummary={() => void shareProjectSummary()} />}
     </View>
   );
 }
 
-function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDeleteRoom, onDeleteAllScans, onDeleteAllScansEverywhere, onSaveRoomConnection, onOpenRoomViewer, selectedCatalogObjectId, onSelectCatalogObject, onPlaceObject, onRunValidation, onOpenCamera, onOpenStream, onClearPlacements, onOpenMeasure, onOpenRoomScan, fieldNoteText, onFieldNoteTextChange, onAddFieldNote }: any) {
+function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDeleteRoom, onDeleteAllScans, onDeleteAllScansEverywhere, onSaveRoomConnection, onOpenRoomViewer, selectedCatalogObjectId, onSelectCatalogObject, onPlaceObject, onRunValidation, onOpenCamera, onOpenStream, onClearPlacements, onOpenMeasure, onOpenRoomScan, fieldNoteText, onFieldNoteTextChange, onAddFieldNote, onImportBlueprint, onShareProjectSummary }: any) {
   const selectedCatalogObject = starterCatalog.find((item) => item.id === selectedCatalogObjectId);
   return <View style={styles.panel}>
     <Text style={styles.panelTitle}>{project.name}</Text>
@@ -442,6 +486,8 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDe
     <View style={styles.actionList}>
       <Button label="Reset room placements" onPress={onClearPlacements} />
       <Button label="Capture photo" onPress={onOpenCamera} />
+      <Button label="Import floor plan / blueprint" onPress={onImportBlueprint} />
+      <Button label="Share layout summary" onPress={() => void onShareProjectSummary()} />
       <Button label="Stream to laptop" onPress={onOpenStream} />
       <Button label="Open AR tools" onPress={onOpenMeasure} />
       <Button label="Scan Room" onPress={onOpenRoomScan} />
@@ -450,6 +496,7 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDe
     </View>
     <View style={styles.form}><Text style={styles.sectionLabel}>Manual room</Text><Field label="Room name" value={roomName} onChangeText={onRoomNameChange} /><Button label="Add room" onPress={onAddRoom} /></View>
     <View style={styles.form}><Text style={styles.sectionLabel}>Saved rooms and scans</Text>{project.roomCaptures.length === 0 ? <Text style={styles.empty}>No rooms saved.</Text> : project.roomCaptures.map((room: RoomCapture) => <View key={room.id} style={styles.roomRow}><View style={styles.roomRowCopy}><Text style={styles.moduleName}>{room.name}</Text><Text style={styles.moduleDescription}>{room.source === "roomplan" || room.roomScan ? "RoomPlan scan" : "Manual room"}</Text></View>{room.roomScan && <Pressable onPress={() => onOpenRoomViewer(project.id, room.id, "room")} style={styles.viewButton}><Text style={styles.viewButtonText}>View 3D Scan</Text></Pressable>}<Pressable onPress={() => onDeleteRoom(room)} style={styles.deleteButton}><Text style={styles.deleteButtonText}>{room.roomScan ? "Delete scan" : "Delete room"}</Text></Pressable></View>)}<Button label="Delete scans in this project" onPress={onDeleteAllScans} /><Button label="Delete all scans (all projects)" onPress={onDeleteAllScansEverywhere} /></View>
+    <BlueprintPanel blueprints={project.blueprints} onImport={onImportBlueprint} />
     <RoomConnectionPanel project={project} onSave={onSaveRoomConnection} />
     <Text style={styles.sectionLabel}>Catalog</Text>
     <View style={styles.catalogList}>{starterCatalog.map((item: any) => <Pressable key={item.id} onPress={() => onSelectCatalogObject(item.id)} style={[styles.catalogItem, item.id === selectedCatalogObjectId && styles.selectedCard]}><Text style={styles.moduleName}>{item.name}</Text><Text style={styles.moduleDescription}>{item.category} · {item.placementMode}</Text></Pressable>)}</View>
@@ -459,6 +506,20 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDe
     <View style={styles.form}><Text style={styles.sectionLabel}>Site photos ({project.photos.length})</Text>{project.photos.length === 0 ? <Text style={styles.empty}>No site photos yet.</Text> : <View style={styles.photoGrid}>{project.photos.slice(0, 6).map((photo: any) => <Image key={photo.id} source={{ uri: photo.uri }} style={styles.photo} accessibilityLabel="Project site photo" />)}</View>}</View>
     <View style={styles.validationHeader}><Text style={styles.sectionLabel}>Validation</Text><Button label="Run validation" onPress={onRunValidation} /></View>
     <ValidationResults project={project} />
+  </View>;
+}
+
+function BlueprintPanel({ blueprints, onImport }: { blueprints: ProjectBlueprintReference[]; onImport: () => void }) {
+  return <View style={styles.form}>
+    <View style={styles.validationHeader}><Text style={styles.sectionLabel}>Plan references</Text><Button label="Import" onPress={onImport} /></View>
+    <Text style={styles.helper}>Attach a 2D floor plan or blueprint to keep the planned layout grounded in the project record.</Text>
+    {blueprints.length === 0 ? <Text style={styles.empty}>No floor plan imported yet.</Text> : blueprints.map((blueprint) => {
+      const isImage = blueprint.mimeType?.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(blueprint.name);
+      return <View key={blueprint.id} style={styles.blueprintRow}>
+        {isImage ? <Image source={{ uri: blueprint.uri }} style={styles.blueprintPreview} accessibilityLabel={`${blueprint.name} floor plan`} /> : <View style={styles.documentBadge}><Text style={styles.documentBadgeText}>PDF</Text></View>}
+        <View style={styles.blueprintCopy}><Text style={styles.moduleName} numberOfLines={1}>{blueprint.name}</Text><Text style={styles.moduleDescription}>Imported {new Date(blueprint.importedAt).toLocaleDateString()} · {blueprint.mimeType?.split("/").pop()?.toUpperCase() ?? "FILE"}</Text></View>
+      </View>;
+    })}
   </View>;
 }
 
@@ -593,4 +654,9 @@ const styles = StyleSheet.create({
   noteDate: { color: colors.muted, fontSize: 12 },
   photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   photo: { width: 92, height: 92, borderRadius: 10, backgroundColor: colors.border },
+  blueprintRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  blueprintPreview: { width: 64, height: 64, backgroundColor: colors.border },
+  documentBadge: { width: 64, height: 64, alignItems: "center", justifyContent: "center", backgroundColor: colors.navy },
+  documentBadgeText: { color: colors.surface, fontWeight: "800", fontSize: 12 },
+  blueprintCopy: { flex: 1 },
 });

@@ -1,9 +1,28 @@
 import type { MeasurementLogEntry } from "../domain/measurementLog";
-import type { Project } from "../domain/projects";
+import type { Project, RoomScanData } from "../domain/projects";
 import type { ScanMeasurementLogEntry } from "../domain/scanMeasurementLog";
 
 export const PROJECT_DOCUMENT_KIND = "construction-ar-project";
-export const PROJECT_SCHEMA_VERSION = 5;
+export const PROJECT_SCHEMA_VERSION = 6;
+
+/**
+ * Keep the project index small enough to load during normal navigation. The
+ * complete RoomPlan archive and supplemental mesh live in Documents and are
+ * loaded only by a viewer that needs them.
+ */
+export function summarizeRoomScan(scan: RoomScanData): RoomScanData {
+  const { nativeCapturedRoomJSON: _nativeCapturedRoomJSON, arkitMesh: _arkitMesh, ...summary } = scan;
+  return summary;
+}
+
+export function summarizeProjectScans(project: Project): Project {
+  return {
+    ...project,
+    roomCaptures: project.roomCaptures.map((room) =>
+      room.roomScan ? { ...room, roomScan: summarizeRoomScan(room.roomScan) } : room,
+    ),
+  };
+}
 
 export interface ProjectDocument {
   kind: typeof PROJECT_DOCUMENT_KIND;
@@ -41,6 +60,7 @@ export function createEmptyProjectDocument(
       placedObjects: overrides.placedObjects ?? [],
       photos: overrides.photos ?? [],
       fieldNotes: overrides.fieldNotes ?? [],
+      blueprints: overrides.blueprints ?? [],
       spatialModel: overrides.spatialModel ?? {
         coordinateSystem: "project-local",
         roomTransforms: {},
@@ -79,6 +99,7 @@ export function hydrateProjectDocument(document: unknown): ProjectDocument | nul
       ...candidate.project,
       photos: candidate.project.photos ?? [],
       fieldNotes: candidate.project.fieldNotes ?? [],
+      blueprints: candidate.project.blueprints ?? [],
       spatialModel: candidate.project.spatialModel ?? {
         coordinateSystem: "project-local",
         roomTransforms: Object.fromEntries(

@@ -23,10 +23,30 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
   private var lastModelJSON = ""
   private var panGesture: UIPanGestureRecognizer?
   private var lastPanLocation = CGPoint.zero
+  private var hasReleasedScene = false
+  private var measurementLabelCount = 0
 
   override init(frame: CGRect) { super.init(frame: frame); configureView() }
   required init?(coder: NSCoder) { super.init(coder: coder); configureView() }
   override func layoutSubviews() { super.layoutSubviews(); sceneView.frame = bounds }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil {
+      if hasReleasedScene {
+        hasReleasedScene = false
+        sceneView.scene = scene
+        if contentNode.parent == nil { scene.rootNode.addChildNode(contentNode) }
+        lastModelJSON = ""
+      }
+      // React Native may apply modelJSON before this view is attached. Always
+      // reconcile once it enters a window so the first saved scan is visible.
+      sceneView.isHidden = false
+      rebuildIfNeeded()
+    } else if window == nil {
+      releaseSceneResources()
+    }
+  }
 
   private func configureView() {
     sceneView.scene = scene
@@ -53,10 +73,11 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
   }
 
   private func rebuildIfNeeded(force: Bool = false) {
+    guard window != nil else { return }
     guard force || modelJSON != lastModelJSON || roomNodes.isEmpty else { refreshSelection(); return }
     let shouldFitCamera = roomNodes.isEmpty
     lastModelJSON = modelJSON
-    roomNodes.removeAll(); roomTransforms.removeAll()
+    roomNodes.removeAll(); roomTransforms.removeAll(); measurementLabelCount = 0
     contentNode.childNodes.forEach { $0.removeFromParentNode() }
     guard let data = modelJSON.data(using: .utf8), let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rooms = root["rooms"] as? [[String: Any]] else { resetCamera(); return }
     for room in rooms { buildRoom(room) }
@@ -95,8 +116,10 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     node.name = "feature|\(roomId)|\(featureId)"
     node.geometry?.firstMaterial = material(for: kind, category: element["category"] as? String ?? "")
     parent.addChildNode(node)
-    if showMeasurements {
+    let canLabel = ["wall", "door", "window", "opening", "floor", "ceiling"].contains(kind)
+    if showMeasurements && canLabel && measurementLabelCount < 12 {
       addMeasurementLabel(measurements.filter { ($0["elementId"] as? String) == featureId }, to: node, kind: kind, dimensions: SIMD3<Float>(width, height, depth))
+      measurementLabelCount += 1
     }
   }
 
@@ -111,8 +134,8 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     guard !available.isEmpty else { return }
     let labelText: String
     if kind == "wall" || kind == "floor" {
-      let wallPrefix = kind == "wall" ? "\((measurements.first?["wallId"] as? String) ?? "Wall") — " : ""
-      labelText = wallPrefix + available.map { String(format: "%.2f", $0) }.joined(separator: " × ") + " m"
+      let wallPrefix = kind == "wall" ? "\((measurements.first?["wallId"] as? String) ?? "Wall") " : ""
+      labelText = wallPrefix + available.map { String(format: "%.2f", $0) }.joined(separator: " × ") + "m"
     } else {
       labelText = zip(["W", "H", "D"], available).map { "\($0.0) \(String(format: "%.2f", $0.1))" }.joined(separator: " × ") + " m"
     }
@@ -121,7 +144,6 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     text.flatness = 0.1
     text.firstMaterial = material(for: "measurement", category: "")
     let labelNode = SCNNode(geometry: text)
-    labelNode.scale = SCNVector3(0.01, 0.01, 0.01)
     switch kind {
     case "floor": labelNode.position = SCNVector3(0, 0.08, 0)
     case "wall", "door", "window", "opening": labelNode.position = SCNVector3(0, 0, dimensions.z / 2 + 0.06)
@@ -131,7 +153,18 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     // only changes orientation so the annotation stays readable.
     labelNode.constraints = [SCNBillboardConstraint()]
     centerTextPivot(labelNode)
+    resizeMeasurementLabel(textNode: labelNode, backingNode: labelNode.childNode(withName: "measurement-backing", recursively: false))
     node.addChildNode(labelNode)
+  }
+
+  private func resizeMeasurementLabel(textNode: SCNNode, backingNode: SCNNode?) {
+    guard let text = textNode.geometry as? SCNText else { return }
+    let (minBounds, maxBounds) = text.boundingBox
+    let rawWidth = maxBounds.x - minBounds.x
+    let rawHeight = maxBounds.y - minBounds.y
+    let textScale = min(0.006, max(0.0025, 0.30 / max(rawWidth, 1)))
+    textNode.scale = SCNVector3(textScale, textScale, textScale)
+    backingNode?.geometry = SCNPlane(width: CGFloat(min(max(rawWidth * textScale + 0.035, 0.08), 0.36)), height: CGFloat(min(max(rawHeight * textScale + 0.025, 0.045), 0.07)))
   }
 
   private func centerTextPivot(_ node: SCNNode) {
@@ -224,6 +257,22 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     cameraNode.position = SCNVector3(center.x + span * 1.35, center.y + span * 0.95, center.z + span * 1.35); cameraNode.look(at: center)
     scene.rootNode.childNodes.filter { $0.camera != nil }.forEach { $0.removeFromParentNode() }; scene.rootNode.addChildNode(cameraNode)
   }
+
+  private func releaseSceneResources() {
+    guard !hasReleasedScene else { return }
+    hasReleasedScene = true
+    if let panGesture { sceneView.removeGestureRecognizer(panGesture) }
+    panGesture = nil
+    roomNodes.removeAll()
+    roomTransforms.removeAll()
+    lastModelJSON = ""
+    measurementLabelCount = 0
+    contentNode.childNodes.forEach { $0.removeFromParentNode() }
+    scene.rootNode.childNodes.filter { $0.camera != nil }.forEach { $0.removeFromParentNode() }
+    sceneView.scene = nil
+  }
+
+  deinit { releaseSceneResources() }
 
   private func apply(_ transform: [String: Any], to node: SCNNode) {
     let position = transform["position"] as? [String: Any] ?? [:]; node.position = SCNVector3(number(position["x"]), number(position["y"]), number(position["z"]))

@@ -5,6 +5,7 @@ export * from "./measurementLog";
 export * from "./scanMeasurementLog";
 export * from "./measurements";
 export * from "./measurementUnits";
+export * from "./projectReport";
 export * from "./projects";
 export * from "./spatial";
 export * from "./validation";

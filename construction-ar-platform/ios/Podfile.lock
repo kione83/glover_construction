@@ -224,6 +224,8 @@ PODS:
     - ExpoCamera
     - ZXingObjC/OneD
     - ZXingObjC/PDF417
+  - ExpoDocumentPicker (57.0.1):
+    - ExpoModulesCore
   - ExpoDomWebView (57.0.1):
     - ExpoModulesCore
   - ExpoFileSystem (57.0.5):
@@ -2829,6 +2831,7 @@ DEPENDENCIES:
   - ExpoAsset (from `../node_modules/expo/node_modules/expo-asset/ios`)
   - ExpoCamera (from `../node_modules/expo-camera/ios`)
   - ExpoCameraBarcodeScanning (from `../node_modules/expo-camera/ios`)
+  - ExpoDocumentPicker (from `../node_modules/expo-document-picker/ios`)
   - "ExpoDomWebView (from `../node_modules/expo/node_modules/@expo/dom-webview/ios`)"
   - ExpoFileSystem (from `../node_modules/expo-file-system/ios`)
   - ExpoFont (from `../node_modules/expo/node_modules/expo-font/ios`)
@@ -2953,6 +2956,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-camera/ios"
   ExpoCameraBarcodeScanning:
     :path: "../node_modules/expo-camera/ios"
+  ExpoDocumentPicker:
+    :path: "../node_modules/expo-document-picker/ios"
   ExpoDomWebView:
     :path: "../node_modules/expo/node_modules/@expo/dom-webview/ios"
   ExpoFileSystem:
@@ -3145,6 +3150,7 @@ SPEC CHECKSUMS:
   ExpoAsset: b8c66d7e07922d39f280e1a79b5f70ef8e238bbc
   ExpoCamera: 00a098da25adbc6013f051b5db47279cb10a716c
   ExpoCameraBarcodeScanning: 14c72e1f522eb69f7a672d757eb294c096756faa
+  ExpoDocumentPicker: 6fb67a6f39ba9beb53a4b4a3f2949e0b5e9bc3bf
   ExpoDomWebView: beaec034e51bd028428b98bb1f2633ab79c6d095
   ExpoFileSystem: 0e74ed1536e1643f4a352d84ed55d311d795828d
   ExpoFont: 59e1faf66ba9bcd232ae1e2ce58d202a48b6f65e
