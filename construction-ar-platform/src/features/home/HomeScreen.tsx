@@ -32,6 +32,7 @@ import { validateProject } from "../../domain/validationService";
 import { createEmptyProjectDocument, updateProjectSummary } from "../../storage/projectDocument";
 import {
   loadProjectDocuments,
+  persistProjectMedia,
   saveProjectDocuments,
 } from "../../storage/projectRepository";
 import { colors } from "../../theme/colors";
@@ -56,6 +57,7 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
   const [roomName, setRoomName] = useState("");
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState<string>();
   const [fieldNoteText, setFieldNoteText] = useState("");
+  const [storageError, setStorageError] = useState<string>();
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
@@ -64,40 +66,57 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
 
   useEffect(() => {
     void (async () => {
-      const documents = await loadProjectDocuments();
-      const loadedProjects = documents.map((document) => document.project);
-      setProjects(loadedProjects);
-      setSelectedProjectId(loadedProjects[0]?.id);
-      setIsLoading(false);
+      try {
+        const documents = await loadProjectDocuments();
+        const loadedProjects = documents.map((document) => document.project);
+        setProjects(loadedProjects);
+        setSelectedProjectId(loadedProjects[0]?.id);
+      } catch (error) {
+        reportStorageError(error);
+      } finally {
+        setIsLoading(false);
+      }
     })();
   }, []);
 
-  async function persist(nextProjects: Project[]) {
-    setProjects(nextProjects);
-    const existingDocuments = await loadProjectDocuments();
+  function reportStorageError(error: unknown) {
+    const message = error instanceof Error ? error.message : "Project data could not be saved or loaded.";
+    setStorageError(message);
+    Alert.alert("Project storage unavailable", message);
+  }
 
-    await saveProjectDocuments(
-      nextProjects.map((project) => {
-        const existingDocument = existingDocuments.find(
-          (document) => document.project.id === project.id,
-        );
+  async function persist(nextProjects: Project[]): Promise<boolean> {
+    try {
+      const existingDocuments = await loadProjectDocuments();
+      await saveProjectDocuments(
+        nextProjects.map((project) => {
+          const existingDocument = existingDocuments.find(
+            (document) => document.project.id === project.id,
+          );
 
-        if (existingDocument) {
+          if (existingDocument) {
+            return {
+              ...existingDocument,
+              project,
+            };
+          }
+
           return {
-            ...existingDocument,
+            ...createEmptyProjectDocument({
+              id: project.id,
+              name: project.name,
+            }),
             project,
           };
-        }
-
-        return {
-          ...createEmptyProjectDocument({
-            id: project.id,
-            name: project.name,
-          }),
-          project,
-        };
-      }),
-    );
+        }),
+      );
+      setProjects(nextProjects);
+      setStorageError(undefined);
+      return true;
+    } catch (error) {
+      reportStorageError(error);
+      return false;
+    }
   }
 
   async function createProject() {
@@ -114,7 +133,7 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
       siteName: siteName.trim() || undefined,
     });
     const nextProjects = [document.project, ...projects];
-    await persist(nextProjects);
+    if (!(await persist(nextProjects))) return;
     setSelectedProjectId(document.project.id);
     setProjectName("");
     setClientName("");
@@ -168,8 +187,13 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
 
   async function addProjectPhoto(uri: string) {
     if (!selectedProject) return;
-    const photo = { id: `photo-${Date.now()}`, uri, capturedAt: new Date().toISOString() };
-    await updateSelectedProject((project) => ({ ...project, photos: [photo, ...project.photos] }));
+    const photo = { id: `photo-${Date.now()}`, uri: "", capturedAt: new Date().toISOString() };
+    try {
+      photo.uri = await persistProjectMedia(selectedProject.id, photo.id, uri);
+      await updateSelectedProject((project) => ({ ...project, photos: [photo, ...project.photos] }));
+    } catch (error) {
+      reportStorageError(error);
+    }
   }
 
   async function importBlueprint() {
@@ -182,18 +206,23 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
     if (result.canceled || !result.assets?.[0]) return;
 
     const asset = result.assets[0];
-    const blueprint: ProjectBlueprintReference = {
-      id: `blueprint-${Date.now()}`,
-      name: asset.name,
-      uri: asset.uri,
-      mimeType: asset.mimeType,
-      size: asset.size,
-      importedAt: new Date().toISOString(),
-    };
-    await updateSelectedProject((project) => ({
-      ...project,
-      blueprints: [blueprint, ...project.blueprints],
-    }));
+    const blueprintId = `blueprint-${Date.now()}`;
+    try {
+      const blueprint: ProjectBlueprintReference = {
+        id: blueprintId,
+        name: asset.name,
+        uri: await persistProjectMedia(selectedProject.id, blueprintId, asset.uri, asset.name),
+        mimeType: asset.mimeType,
+        size: asset.size,
+        importedAt: new Date().toISOString(),
+      };
+      await updateSelectedProject((project) => ({
+        ...project,
+        blueprints: [blueprint, ...project.blueprints],
+      }));
+    } catch (error) {
+      reportStorageError(error);
+    }
   }
 
   async function shareProjectSummary() {
@@ -297,6 +326,8 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
             anchorId,
             displayName: catalogObject.name,
             transform,
+            transformSpace: "room-local",
+            roomLocalTransform: transform,
             dimensions: catalogObject.defaultDimensions,
             representation: catalogObject.representation,
             status: "active",
@@ -329,19 +360,23 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
   }
 
   async function deleteRoomConfirmed(roomId: string) {
-    const documents = await loadProjectDocuments();
-    const updatedDocuments = documents.map((document) => {
-      if (document.project.id !== selectedProjectId) return document;
-      const nextProject = updateProjectSummary(removeRoomFromProject(document.project, roomId));
-      return {
-        ...document,
-        project: nextProject,
-        measurementLogEntries: document.measurementLogEntries.filter((entry) => entry.roomCaptureId !== roomId),
-        scanMeasurementLogEntries: (document.scanMeasurementLogEntries ?? []).filter((entry) => entry.roomCaptureId !== roomId),
-      };
-    });
-    await saveProjectDocuments(updatedDocuments);
-    setProjects(updatedDocuments.map((document) => document.project));
+    try {
+      const documents = await loadProjectDocuments();
+      const updatedDocuments = documents.map((document) => {
+        if (document.project.id !== selectedProjectId) return document;
+        const nextProject = updateProjectSummary(removeRoomFromProject(document.project, roomId));
+        return {
+          ...document,
+          project: nextProject,
+          measurementLogEntries: document.measurementLogEntries.filter((entry) => entry.roomCaptureId !== roomId),
+          scanMeasurementLogEntries: (document.scanMeasurementLogEntries ?? []).filter((entry) => entry.roomCaptureId !== roomId),
+        };
+      });
+      await saveProjectDocuments(updatedDocuments);
+      setProjects(updatedDocuments.map((document) => document.project));
+    } catch (error) {
+      reportStorageError(error);
+    }
   }
 
   function deleteAllScans() {
@@ -356,19 +391,23 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
   }
 
   async function deleteAllScansConfirmed() {
-    const documents = await loadProjectDocuments();
-    const updatedDocuments = documents.map((document) => {
-      if (document.project.id !== selectedProjectId) return document;
-      const scanRoomIds = new Set(document.project.roomCaptures.filter((room) => room.source === "roomplan" || room.roomScan).map((room) => room.id));
-      return {
-        ...document,
-        project: updateProjectSummary(clearSavedRoomScansFromProject(document.project)),
-        measurementLogEntries: document.measurementLogEntries.filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
-        scanMeasurementLogEntries: (document.scanMeasurementLogEntries ?? []).filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
-      };
-    });
-    await saveProjectDocuments(updatedDocuments);
-    setProjects(updatedDocuments.map((document) => document.project));
+    try {
+      const documents = await loadProjectDocuments();
+      const updatedDocuments = documents.map((document) => {
+        if (document.project.id !== selectedProjectId) return document;
+        const scanRoomIds = new Set(document.project.roomCaptures.filter((room) => room.source === "roomplan" || room.roomScan).map((room) => room.id));
+        return {
+          ...document,
+          project: updateProjectSummary(clearSavedRoomScansFromProject(document.project)),
+          measurementLogEntries: document.measurementLogEntries.filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
+          scanMeasurementLogEntries: (document.scanMeasurementLogEntries ?? []).filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
+        };
+      });
+      await saveProjectDocuments(updatedDocuments);
+      setProjects(updatedDocuments.map((document) => document.project));
+    } catch (error) {
+      reportStorageError(error);
+    }
   }
 
   function deleteAllScansEverywhere() {
@@ -392,22 +431,26 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
   }
 
   async function deleteAllScansEverywhereConfirmed() {
-    const documents = await loadProjectDocuments();
-    const updatedDocuments = documents.map((document) => {
-      const scanRoomIds = new Set(
-        document.project.roomCaptures
-          .filter((room) => room.source === "roomplan" || room.roomScan)
-          .map((room) => room.id),
-      );
-      return {
-        ...document,
-        project: updateProjectSummary(clearSavedRoomScansFromProject(document.project)),
-        measurementLogEntries: document.measurementLogEntries.filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
-        scanMeasurementLogEntries: (document.scanMeasurementLogEntries ?? []).filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
-      };
-    });
-    await saveProjectDocuments(updatedDocuments);
-    setProjects(updatedDocuments.map((document) => document.project));
+    try {
+      const documents = await loadProjectDocuments();
+      const updatedDocuments = documents.map((document) => {
+        const scanRoomIds = new Set(
+          document.project.roomCaptures
+            .filter((room) => room.source === "roomplan" || room.roomScan)
+            .map((room) => room.id),
+        );
+        return {
+          ...document,
+          project: updateProjectSummary(clearSavedRoomScansFromProject(document.project)),
+          measurementLogEntries: document.measurementLogEntries.filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
+          scanMeasurementLogEntries: (document.scanMeasurementLogEntries ?? []).filter((entry) => !scanRoomIds.has(entry.roomCaptureId)),
+        };
+      });
+      await saveProjectDocuments(updatedDocuments);
+      setProjects(updatedDocuments.map((document) => document.project));
+    } catch (error) {
+      reportStorageError(error);
+    }
   }
 
   async function saveRoomConnection(input: {
@@ -448,6 +491,8 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
         <Text style={styles.eyebrow}>Construction AR Platform</Text>
         <Text style={styles.title}>Project workspace</Text>
       </View>
+
+      {storageError && <Text style={styles.storageError}>Storage warning: {storageError}</Text>}
 
       <View style={styles.panel}>
         <View style={styles.sectionHeader}>
@@ -617,6 +662,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: colors.muted,
   },
+  storageError: { color: "#a02a1e", fontSize: 13, lineHeight: 19, padding: 12, borderWidth: 1, borderColor: "#e4a9a2", backgroundColor: "#fff4f2" },
   empty: { color: colors.muted, fontSize: 15 },
   form: { gap: 10, padding: 14, borderRadius: 0, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   field: { gap: 5 },

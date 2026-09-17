@@ -10,4 +10,5 @@ export * from "./projects";
 export * from "./spatial";
 export * from "./validation";
 export * from "./validationService";
+export * from "./roomScanMesh";
 export * from "../storage/projectDocument";

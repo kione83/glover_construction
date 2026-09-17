@@ -30,6 +30,8 @@ export interface Transform3D {
   position: Vec3;
   rotation: RotationEuler;
   scale: Vec3;
+  /** Optional row-major 4x4 matrix for lossless native geometry transforms. */
+  matrix?: number[];
 }
 
 export interface SurfaceReference {

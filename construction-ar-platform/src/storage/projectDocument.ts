@@ -1,9 +1,10 @@
 import type { MeasurementLogEntry } from "../domain/measurementLog";
 import type { Project, RoomScanData } from "../domain/projects";
 import type { ScanMeasurementLogEntry } from "../domain/scanMeasurementLog";
+import { normalizeProjectHierarchy } from "../domain/roomObjectHierarchy";
 
 export const PROJECT_DOCUMENT_KIND = "construction-ar-project";
-export const PROJECT_SCHEMA_VERSION = 6;
+export const PROJECT_SCHEMA_VERSION = 8;
 
 /**
  * Keep the project index small enough to load during normal navigation. The
@@ -42,7 +43,7 @@ export function createEmptyProjectDocument(
     schemaVersion: PROJECT_SCHEMA_VERSION,
     measurementLogEntries: [],
     scanMeasurementLogEntries: [],
-    project: {
+    project: normalizeProjectHierarchy({
       id: overrides.id,
       name: overrides.name,
       clientName: overrides.clientName,
@@ -74,7 +75,7 @@ export function createEmptyProjectDocument(
           validationIssueCount: 0,
           lastValidatedAt: undefined,
         },
-    },
+    }),
   };
 }
 
@@ -95,8 +96,9 @@ export function hydrateProjectDocument(document: unknown): ProjectDocument | nul
       typeof candidate.schemaVersion === "number"
         ? Math.max(candidate.schemaVersion, PROJECT_SCHEMA_VERSION)
         : PROJECT_SCHEMA_VERSION,
-    project: {
+    project: normalizeProjectHierarchy({
       ...candidate.project,
+      roomCaptures: candidate.project.roomCaptures ?? [],
       photos: candidate.project.photos ?? [],
       fieldNotes: candidate.project.fieldNotes ?? [],
       blueprints: candidate.project.blueprints ?? [],
@@ -111,7 +113,7 @@ export function hydrateProjectDocument(document: unknown): ProjectDocument | nul
         ),
         connections: [],
       },
-    },
+    }),
     measurementLogEntries: Array.isArray(candidate.measurementLogEntries)
       ? candidate.measurementLogEntries
       : [],

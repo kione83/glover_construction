@@ -1,0 +1,2030 @@
+[
+  {
+    "id": "room-1",
+    "name": "Office",
+    "status": "completed",
+    "source": "roomplan",
+    "unit": "m",
+    "surfaces": [],
+    "roomScan": {
+      "version": 1,
+      "source": "roomplan",
+      "capturedAt": "2026-09-09T00:00:00Z",
+      "floorFootprint": {
+        "width": 4,
+        "height": 0,
+        "depth": 5,
+        "unit": "m"
+      },
+      "ceilingHeight": 3,
+      "elements": [
+        {
+          "id": "0-back",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 4,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.5,
+              "z": -2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.5,
+              0.0,
+              0,
+              1.0,
+              -2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-right",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 5,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 2,
+              "y": 1.5,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 1.5707963267948966,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              6.123233995736766e-17,
+              0,
+              1.0,
+              2,
+              0,
+              1,
+              0,
+              1.5,
+              -1.0,
+              0,
+              6.123233995736766e-17,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-front",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 4,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.5,
+              "z": 2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.5,
+              0.0,
+              0,
+              1.0,
+              2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-left",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 5,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": -2,
+              "y": 1.5,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 1.5707963267948966,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              6.123233995736766e-17,
+              0,
+              1.0,
+              -2,
+              0,
+              1,
+              0,
+              1.5,
+              -1.0,
+              0,
+              6.123233995736766e-17,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-floor",
+          "kind": "floor",
+          "category": "floor",
+          "representation": "floor",
+          "dimensions": {
+            "width": 4,
+            "height": 0,
+            "depth": 5,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0.0,
+              0,
+              1.0,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-door",
+          "kind": "door",
+          "category": "door",
+          "representation": "door",
+          "dimensions": {
+            "width": 0.9,
+            "height": 2.1,
+            "depth": 0.04,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0.5,
+              "y": 1.05,
+              "z": -2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0.5,
+              0,
+              1,
+              0,
+              1.05,
+              0.0,
+              0,
+              1.0,
+              -2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-window",
+          "kind": "window",
+          "category": "window",
+          "representation": "window",
+          "dimensions": {
+            "width": 1.2,
+            "height": 1,
+            "depth": 0.03,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.7,
+              "z": 2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.7,
+              0.0,
+              0,
+              1.0,
+              2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "0-chair",
+          "kind": "furniture",
+          "category": "furniture",
+          "representation": "generic-object",
+          "dimensions": {
+            "width": 0.5,
+            "height": 1,
+            "depth": 0.5,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 1,
+              "y": 0.5,
+              "z": 1
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              1,
+              0,
+              1,
+              0,
+              0.5,
+              0.0,
+              0,
+              1.0,
+              1,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        }
+      ],
+      "measurements": [
+        {
+          "id": "0-back-width",
+          "elementId": "0-back",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-back-height",
+          "elementId": "0-back",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-right-width",
+          "elementId": "0-right",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-right-height",
+          "elementId": "0-right",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-front-width",
+          "elementId": "0-front",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-front-height",
+          "elementId": "0-front",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-left-width",
+          "elementId": "0-left",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-left-height",
+          "elementId": "0-left",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-floor-width",
+          "elementId": "0-floor",
+          "category": "floor",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-floor-depth",
+          "elementId": "0-floor",
+          "category": "floor",
+          "dimension": "depth",
+          "label": "depth",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-door-width",
+          "elementId": "0-door",
+          "category": "door",
+          "dimension": "width",
+          "label": "width",
+          "value": 0.9,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.9,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-door-height",
+          "elementId": "0-door",
+          "category": "door",
+          "dimension": "height",
+          "label": "height",
+          "value": 2.1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 2.1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-window-width",
+          "elementId": "0-window",
+          "category": "window",
+          "dimension": "width",
+          "label": "width",
+          "value": 1.2,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1.2,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-window-height",
+          "elementId": "0-window",
+          "category": "window",
+          "dimension": "height",
+          "label": "height",
+          "value": 1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-chair-width",
+          "elementId": "0-chair",
+          "category": "furniture",
+          "dimension": "width",
+          "label": "width",
+          "value": 0.5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-chair-height",
+          "elementId": "0-chair",
+          "category": "furniture",
+          "dimension": "height",
+          "label": "height",
+          "value": 1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "0-chair-depth",
+          "elementId": "0-chair",
+          "category": "furniture",
+          "dimension": "depth",
+          "label": "depth",
+          "value": 0.5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        }
+      ],
+      "portal": {
+        "format": "construction-ar-room-scan",
+        "version": 1
+      }
+    }
+  },
+  {
+    "id": "room-2",
+    "name": "Hall",
+    "status": "completed",
+    "source": "roomplan",
+    "unit": "m",
+    "surfaces": [],
+    "roomScan": {
+      "version": 1,
+      "source": "roomplan",
+      "capturedAt": "2026-09-09T00:00:00Z",
+      "floorFootprint": {
+        "width": 4,
+        "height": 0,
+        "depth": 5,
+        "unit": "m"
+      },
+      "ceilingHeight": 3,
+      "elements": [
+        {
+          "id": "1-back",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 4,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.5,
+              "z": -2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.5,
+              0.0,
+              0,
+              1.0,
+              -2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-right",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 5,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 2,
+              "y": 1.5,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 1.5707963267948966,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              6.123233995736766e-17,
+              0,
+              1.0,
+              2,
+              0,
+              1,
+              0,
+              1.5,
+              -1.0,
+              0,
+              6.123233995736766e-17,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-front",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 4,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.5,
+              "z": 2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.5,
+              0.0,
+              0,
+              1.0,
+              2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-left",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 5,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": -2,
+              "y": 1.5,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 1.5707963267948966,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              6.123233995736766e-17,
+              0,
+              1.0,
+              -2,
+              0,
+              1,
+              0,
+              1.5,
+              -1.0,
+              0,
+              6.123233995736766e-17,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-floor",
+          "kind": "floor",
+          "category": "floor",
+          "representation": "floor",
+          "dimensions": {
+            "width": 4,
+            "height": 0,
+            "depth": 5,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0.0,
+              0,
+              1.0,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-door",
+          "kind": "door",
+          "category": "door",
+          "representation": "door",
+          "dimensions": {
+            "width": 0.9,
+            "height": 2.1,
+            "depth": 0.04,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0.5,
+              "y": 1.05,
+              "z": -2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0.5,
+              0,
+              1,
+              0,
+              1.05,
+              0.0,
+              0,
+              1.0,
+              -2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-window",
+          "kind": "window",
+          "category": "window",
+          "representation": "window",
+          "dimensions": {
+            "width": 1.2,
+            "height": 1,
+            "depth": 0.03,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.7,
+              "z": 2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.7,
+              0.0,
+              0,
+              1.0,
+              2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "1-chair",
+          "kind": "furniture",
+          "category": "furniture",
+          "representation": "generic-object",
+          "dimensions": {
+            "width": 0.5,
+            "height": 1,
+            "depth": 0.5,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 1,
+              "y": 0.5,
+              "z": 1
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              1,
+              0,
+              1,
+              0,
+              0.5,
+              0.0,
+              0,
+              1.0,
+              1,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        }
+      ],
+      "measurements": [
+        {
+          "id": "1-back-width",
+          "elementId": "1-back",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-back-height",
+          "elementId": "1-back",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-right-width",
+          "elementId": "1-right",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-right-height",
+          "elementId": "1-right",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-front-width",
+          "elementId": "1-front",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-front-height",
+          "elementId": "1-front",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-left-width",
+          "elementId": "1-left",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-left-height",
+          "elementId": "1-left",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-floor-width",
+          "elementId": "1-floor",
+          "category": "floor",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-floor-depth",
+          "elementId": "1-floor",
+          "category": "floor",
+          "dimension": "depth",
+          "label": "depth",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-door-width",
+          "elementId": "1-door",
+          "category": "door",
+          "dimension": "width",
+          "label": "width",
+          "value": 0.9,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.9,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-door-height",
+          "elementId": "1-door",
+          "category": "door",
+          "dimension": "height",
+          "label": "height",
+          "value": 2.1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 2.1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-window-width",
+          "elementId": "1-window",
+          "category": "window",
+          "dimension": "width",
+          "label": "width",
+          "value": 1.2,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1.2,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-window-height",
+          "elementId": "1-window",
+          "category": "window",
+          "dimension": "height",
+          "label": "height",
+          "value": 1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-chair-width",
+          "elementId": "1-chair",
+          "category": "furniture",
+          "dimension": "width",
+          "label": "width",
+          "value": 0.5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-chair-height",
+          "elementId": "1-chair",
+          "category": "furniture",
+          "dimension": "height",
+          "label": "height",
+          "value": 1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "1-chair-depth",
+          "elementId": "1-chair",
+          "category": "furniture",
+          "dimension": "depth",
+          "label": "depth",
+          "value": 0.5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        }
+      ],
+      "portal": {
+        "format": "construction-ar-room-scan",
+        "version": 1
+      }
+    }
+  },
+  {
+    "id": "room-3",
+    "name": "Kitchen",
+    "status": "completed",
+    "source": "roomplan",
+    "unit": "m",
+    "surfaces": [],
+    "roomScan": {
+      "version": 1,
+      "source": "roomplan",
+      "capturedAt": "2026-09-09T00:00:00Z",
+      "floorFootprint": {
+        "width": 4,
+        "height": 0,
+        "depth": 5,
+        "unit": "m"
+      },
+      "ceilingHeight": 3,
+      "elements": [
+        {
+          "id": "2-back",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 4,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.5,
+              "z": -2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.5,
+              0.0,
+              0,
+              1.0,
+              -2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-right",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 5,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 2,
+              "y": 1.5,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 1.5707963267948966,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              6.123233995736766e-17,
+              0,
+              1.0,
+              2,
+              0,
+              1,
+              0,
+              1.5,
+              -1.0,
+              0,
+              6.123233995736766e-17,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-front",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 4,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.5,
+              "z": 2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.5,
+              0.0,
+              0,
+              1.0,
+              2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-left",
+          "kind": "wall",
+          "category": "wall",
+          "representation": "wall",
+          "dimensions": {
+            "width": 5,
+            "height": 3,
+            "depth": 0,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": -2,
+              "y": 1.5,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 1.5707963267948966,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              6.123233995736766e-17,
+              0,
+              1.0,
+              -2,
+              0,
+              1,
+              0,
+              1.5,
+              -1.0,
+              0,
+              6.123233995736766e-17,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-floor",
+          "kind": "floor",
+          "category": "floor",
+          "representation": "floor",
+          "dimensions": {
+            "width": 4,
+            "height": 0,
+            "depth": 5,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0.0,
+              0,
+              1.0,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-door",
+          "kind": "door",
+          "category": "door",
+          "representation": "door",
+          "dimensions": {
+            "width": 0.9,
+            "height": 2.1,
+            "depth": 0.04,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0.5,
+              "y": 1.05,
+              "z": -2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0.5,
+              0,
+              1,
+              0,
+              1.05,
+              0.0,
+              0,
+              1.0,
+              -2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-window",
+          "kind": "window",
+          "category": "window",
+          "representation": "window",
+          "dimensions": {
+            "width": 1.2,
+            "height": 1,
+            "depth": 0.03,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 1.7,
+              "z": 2.5
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              0,
+              0,
+              1,
+              0,
+              1.7,
+              0.0,
+              0,
+              1.0,
+              2.5,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "id": "2-chair",
+          "kind": "furniture",
+          "category": "furniture",
+          "representation": "generic-object",
+          "dimensions": {
+            "width": 0.5,
+            "height": 1,
+            "depth": 0.5,
+            "unit": "m"
+          },
+          "transform": {
+            "position": {
+              "x": 1,
+              "y": 0.5,
+              "z": 1
+            },
+            "rotation": {
+              "pitch": 0,
+              "yaw": 0,
+              "roll": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            },
+            "matrix": [
+              1.0,
+              0,
+              0.0,
+              1,
+              0,
+              1,
+              0,
+              0.5,
+              0.0,
+              0,
+              1.0,
+              1,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        }
+      ],
+      "measurements": [
+        {
+          "id": "2-back-width",
+          "elementId": "2-back",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-back-height",
+          "elementId": "2-back",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-right-width",
+          "elementId": "2-right",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-right-height",
+          "elementId": "2-right",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-front-width",
+          "elementId": "2-front",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-front-height",
+          "elementId": "2-front",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-left-width",
+          "elementId": "2-left",
+          "category": "wall",
+          "dimension": "width",
+          "label": "width",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-left-height",
+          "elementId": "2-left",
+          "category": "wall",
+          "dimension": "height",
+          "label": "height",
+          "value": 3,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 3,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-floor-width",
+          "elementId": "2-floor",
+          "category": "floor",
+          "dimension": "width",
+          "label": "width",
+          "value": 4,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 4,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-floor-depth",
+          "elementId": "2-floor",
+          "category": "floor",
+          "dimension": "depth",
+          "label": "depth",
+          "value": 5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-door-width",
+          "elementId": "2-door",
+          "category": "door",
+          "dimension": "width",
+          "label": "width",
+          "value": 0.9,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.9,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-door-height",
+          "elementId": "2-door",
+          "category": "door",
+          "dimension": "height",
+          "label": "height",
+          "value": 2.1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 2.1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-window-width",
+          "elementId": "2-window",
+          "category": "window",
+          "dimension": "width",
+          "label": "width",
+          "value": 1.2,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1.2,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-window-height",
+          "elementId": "2-window",
+          "category": "window",
+          "dimension": "height",
+          "label": "height",
+          "value": 1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-chair-width",
+          "elementId": "2-chair",
+          "category": "furniture",
+          "dimension": "width",
+          "label": "width",
+          "value": 0.5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-chair-height",
+          "elementId": "2-chair",
+          "category": "furniture",
+          "dimension": "height",
+          "label": "height",
+          "value": 1,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 1,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        },
+        {
+          "id": "2-chair-depth",
+          "elementId": "2-chair",
+          "category": "furniture",
+          "dimension": "depth",
+          "label": "depth",
+          "value": 0.5,
+          "unit": "m",
+          "status": "stable",
+          "initialEstimate": 0.5,
+          "updatedAt": "2026-09-09T00:00:00Z",
+          "updateCount": 1,
+          "observationCount": 1,
+          "history": [],
+          "source": "roomplan"
+        }
+      ],
+      "portal": {
+        "format": "construction-ar-room-scan",
+        "version": 1
+      }
+    }
+  }
+]

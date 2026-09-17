@@ -123,6 +123,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
   private var placementSnapshotsById: [String: [String: Any]] = [:]
   private var lastPlacementRequestId: Int = 0
   private var lastPlacementEditRequestId: Int = 0
+  private var arSessionId = UUID().uuidString
   private var pendingCapture: PendingCapture?
   private var startEndpoint: CapturedEndpoint?
   private var endEndpoint: CapturedEndpoint?
@@ -216,6 +217,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       configuration.sceneReconstruction = .mesh
     }
 
+    arSessionId = UUID().uuidString
     sceneView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
 
     emitUpdate(
@@ -452,6 +454,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     guard let onMeasurementUpdate else { return }
 
     var payload: [String: Any] = [
+      "arSessionId": arSessionId,
       "tracking": currentTracking.toDictionary(),
       "reticle": reticlePayload(),
       "lastAction": action
@@ -989,6 +992,10 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
         return
       }
       snapshot["position"] = ["x": target.point.x, "y": target.point.y, "z": target.point.z]
+      if var matrix = placementNodesById[objectId]?.simdTransform {
+        matrix.columns.3 = SIMD4(target.point.x, target.point.y, target.point.z, 1)
+        snapshot["transformMatrix"] = placementMatrixValues(matrix)
+      }
       placementSnapshotsById[objectId] = snapshot
       upsertPlacementNode(snapshot)
       emitPlacement(kind: "object-updated", message: "Object moved to the reticle.", object: snapshot)
@@ -998,6 +1005,11 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     let currentRotation = numberValue(snapshot["rotationY"])?.floatValue ?? 0
     let delta: Float = action == "rotate-left" ? -.pi / 12 : .pi / 12
     snapshot["rotationY"] = currentRotation + delta
+    if let matrix = placementNodesById[objectId]?.simdTransform {
+      var rotated = simd_float4x4(simd_quatf(angle: delta, axis: SIMD3(0, 1, 0))) * matrix
+      rotated.columns.3 = matrix.columns.3
+      snapshot["transformMatrix"] = placementMatrixValues(rotated)
+    }
     placementSnapshotsById[objectId] = snapshot
     upsertPlacementNode(snapshot)
     emitPlacement(kind: "object-updated", message: "Object rotation updated.", object: snapshot)
@@ -1043,6 +1055,13 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
       Float(numberValue(position["z"])?.doubleValue ?? 0)
     )
     node.eulerAngles.y = numberValue(snapshot["rotationY"])?.floatValue ?? 0
+    if let m = snapshot["transformMatrix"] as? [NSNumber], m.count == 16, m.allSatisfy({ $0.floatValue.isFinite }) {
+      node.simdTransform = simd_float4x4(columns: (
+        SIMD4(m[0].floatValue, m[4].floatValue, m[8].floatValue, m[12].floatValue),
+        SIMD4(m[1].floatValue, m[5].floatValue, m[9].floatValue, m[13].floatValue),
+        SIMD4(m[2].floatValue, m[6].floatValue, m[10].floatValue, m[14].floatValue),
+        SIMD4(m[3].floatValue, m[7].floatValue, m[11].floatValue, m[15].floatValue)))
+    }
 
     if placementNodesById[id] == nil {
       sceneView.scene.rootNode.addChildNode(node)
@@ -1057,7 +1076,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     for (id, node) in placementNodesById {
       let isSelected = id == selectedId
       node.opacity = isSelected ? 0.95 : 0.72
-      node.scale = isSelected ? SCNVector3(1.05, 1.05, 1.05) : SCNVector3(1, 1, 1)
+      // Selection must not overwrite the persisted local/world scale.
     }
   }
 
@@ -1090,6 +1109,10 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     ]
     if let representation { result["representation"] = representation }
     return result
+  }
+
+  private func placementMatrixValues(_ matrix: simd_float4x4) -> [Float] {
+    (0..<4).flatMap { row in (0..<4).map { column in matrix[column][row] } }
   }
 
   private func makePlacementGeometry(representation: String, width: CGFloat, height: CGFloat, depth: CGFloat) -> SCNNode {
@@ -1154,6 +1177,7 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     }
 
     var payload: [String: Any] = [
+      "arSessionId": arSessionId,
       "lastAction": action,
       "tracking": currentTracking.toDictionary(),
       "reticle": reticlePayload(),

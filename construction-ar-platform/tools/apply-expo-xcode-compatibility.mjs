@@ -39,12 +39,16 @@ const buildCommand = "swift build -c release";
 const safeBuildCommand =
   "CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO swift build -c release";
 
-if (buildScript && !buildScript.includes(safeBuildCommand)) {
-  if (!buildScript.includes(buildCommand)) {
-    console.warn(
-      `ExpoModulesJSI build script compatibility patch skipped; expected build command was not found in ${buildScriptPath}`
-    );
-  } else {
+if (buildScript) {
+  // Newer Expo versions invoke a nested xcodebuild instead of swift build.
+  // Its sanitized environment drops the outer signing settings. The framework
+  // is signed when embedded in the app, so disable only this intermediate step.
+  const nestedBuildMarker = "    BUILD_LIBRARY_FOR_DISTRIBUTION=YES";
+  if (buildScript.includes(nestedBuildMarker) && !buildScript.includes("CODE_SIGNING_ALLOWED=NO")) {
+    await writeFile(buildScriptPath, buildScript.replace(nestedBuildMarker,
+      "    CODE_SIGNING_ALLOWED=NO \\\n" + nestedBuildMarker));
+    console.log("Disabled nested ExpoModulesJSI xcodebuild framework signing.");
+  } else if (!buildScript.includes(safeBuildCommand) && buildScript.includes(buildCommand)) {
     await writeFile(buildScriptPath, buildScript.replace(buildCommand, safeBuildCommand));
     console.log("Disabled nested ExpoModulesJSI framework signing for file-provider-safe builds.");
   }

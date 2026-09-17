@@ -83,6 +83,7 @@ export interface NativeMeasurementAction {
 }
 
 export interface NativeMeasurementUpdatePayload {
+  arSessionId?: string;
   measurement?: NativeMeasurementSnapshot;
   reticle?: NativeMeasurementReticleSnapshot;
   tracking?: NativeMeasurementTrackingSnapshot;
@@ -114,6 +115,8 @@ export interface NativePlacedObjectSnapshot {
   dimensions: NativePlacementDimensions;
   position: NativeMeasurementPoint;
   rotationY: number;
+  /** Row-major object -> current AR world, including scale/tilt. */
+  transformMatrix?: number[];
   representation?: string;
 }
 

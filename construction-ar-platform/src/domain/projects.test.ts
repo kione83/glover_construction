@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createEmptyProjectDocument } from "../storage/projectDocument";
 import {
   connectRoomsInProject,
+  clearSavedRoomScansFromProject,
   relativeYawTransform,
   removePlacedObjectFromProject,
   removeRoomFromProject,
@@ -97,7 +98,7 @@ describe("project spatial and deletion helpers", () => {
     expect(cleaned.placedObjects.map((object) => object.id)).toEqual(["object-b"]);
     expect(cleaned.anchors.map((anchor) => anchor.id)).toEqual(["anchor-b"]);
     expect(cleaned.validationIssues.map((issue) => issue.id)).toEqual(["issue-b"]);
-    expect(cleaned.spatialModel?.roomTransforms).toEqual({ "room-b": transform });
+    expect(cleaned.spatialModel?.roomTransforms).toEqual({ "room-b": connected.spatialModel!.roomTransforms["room-b"] });
     expect(cleaned.spatialModel?.connections).toEqual([]);
   });
 
@@ -106,6 +107,33 @@ describe("project spatial and deletion helpers", () => {
     expect(cleaned.placedObjects.map((object) => object.id)).toEqual(["object-b"]);
     expect(cleaned.anchors.map((anchor) => anchor.id)).toEqual(["anchor-b"]);
     expect(cleaned.validationIssues.map((issue) => issue.id)).toEqual(["issue-b"]);
+  });
+
+  it("removes every scanned room while preserving manual rooms", () => {
+    const base = projectWithRooms();
+    const project = {
+      ...base,
+      roomCaptures: [
+        {
+          ...base.roomCaptures[0],
+          source: "roomplan" as const,
+          roomScan: {
+            version: 1 as const,
+            source: "roomplan" as const,
+            capturedAt: "2026-01-01",
+            elements: [],
+            portal: { format: "construction-ar-room-scan" as const, version: 1 as const },
+          },
+        },
+        { ...base.roomCaptures[1], source: "manual" as const },
+      ],
+    };
+
+    const cleaned = clearSavedRoomScansFromProject(project);
+
+    expect(cleaned.roomCaptures.map((room) => room.id)).toEqual(["room-b"]);
+    expect(cleaned.placedObjects.map((object) => object.roomCaptureId)).toEqual(["room-b"]);
+    expect(cleaned.anchors.map((anchor) => anchor.roomCaptureId)).toEqual(["room-b"]);
   });
 });
 

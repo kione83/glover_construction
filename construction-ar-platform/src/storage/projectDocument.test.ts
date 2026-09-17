@@ -10,7 +10,7 @@ describe("projectDocument", () => {
       name: "Kitchen Remodel",
     });
 
-    expect(document.schemaVersion).toBe(6);
+    expect(document.schemaVersion).toBe(8);
     expect(document.measurementLogEntries).toEqual([]);
     expect(document.scanMeasurementLogEntries).toEqual([]);
     expect(document.project.photos).toEqual([]);
@@ -29,7 +29,7 @@ describe("projectDocument", () => {
     });
 
     expect(hydrated).not.toBeNull();
-    expect(hydrated?.schemaVersion).toBe(6);
+    expect(hydrated?.schemaVersion).toBe(8);
     expect(hydrated?.measurementLogEntries).toEqual([]);
     expect(hydrated?.scanMeasurementLogEntries).toEqual([]);
     expect(hydrated?.project.photos).toEqual([]);

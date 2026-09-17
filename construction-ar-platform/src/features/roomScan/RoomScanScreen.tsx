@@ -16,6 +16,9 @@ import { addRoomToSpatialModel, buildScanMeasurementCsv, createScanMeasurementLo
 import { loadProjectDocuments, loadProjectScan, saveProjectDocuments } from "../../storage/projectRepository";
 import { summarizeProjectScans } from "../../storage/projectDocument";
 import { colors } from "../../theme/colors";
+import { normalizeScanObjects, measurementsForLiveObject, formatObjectDimensions, formatObjectMeasurementDetails } from "../../domain/scannedObjects";
+import { ObjectMeasurementsPanel } from "./ObjectMeasurementsPanel";
+import type { LengthUnit } from "../../domain/spatial";
 import { LiveStreamPanel } from "../camera/LiveStreamPanel";
 import {
   NativeRoomScanView,
@@ -31,12 +34,6 @@ interface RoomScanScreenProps {
 
 function makeRoomId() {
   return `room-scan-${Date.now()}`;
-}
-
-function measurementOrder(category: string): NativeRoomScanMeasurement["dimension"][] {
-  if (category === "wall") return ["width", "height"];
-  if (category === "floor") return ["depth", "width"];
-  return ["width", "height", "depth"];
 }
 
 function measurementFeatureName(category: string, index: number): string {
@@ -75,7 +72,7 @@ function toRoomCapture(project: Project, name: string, scan: RoomScanData): Room
     surfaces: surfaces as RoomCapture["surfaces"],
     notes: "RoomPlan scan. Individual transformed elements preserve irregular room geometry.",
     capturedAt: scan.capturedAt,
-    roomScan: scan,
+    roomScan: normalizeScanObjects(scan, roomId),
   };
 }
 
@@ -92,6 +89,7 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
   const [savedRoomSummary, setSavedRoomSummary] = useState<{ wallCount: number; contentCount: number; ceilingHeight?: number }>();
   const [showMeasurements, setShowMeasurements] = useState(false);
   const [showMeasurementList, setShowMeasurementList] = useState(false);
+  const [measurementUnit, setMeasurementUnit] = useState<LengthUnit>("m");
   const [liveMeasurements, setLiveMeasurements] = useState<NativeRoomScanMeasurement[]>([]);
   const completionHandledRef = useRef(false);
 
@@ -130,13 +128,12 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
       const category = values[0]?.category ?? "feature";
       const index = categoryCounts.get(category) ?? 0;
       categoryCounts.set(category, index + 1);
-      const byDimension = new Map(values.map((measurement) => [measurement.dimension, measurement]));
       const quality = values.some((measurement) => measurement.quality === "limited")
         ? "limited"
         : values.some((measurement) => measurement.quality === "estimating")
           ? "estimating"
           : "stable";
-      return { category, label: values[0]?.wallId ?? measurementFeatureName(category, index), quality, byDimension };
+      return { category, label: values[0]?.wallId ?? measurementFeatureName(category, index), quality, measurements: measurementsForLiveObject(values) };
     });
   }, [liveMeasurements]);
 
@@ -275,9 +272,10 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
             </Pressable>
             {showMeasurementList && <View style={styles.measurementPanel}>
               <Text style={styles.measurementPanelTitle}>Detected measurements</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>{(["m", "ft", "in"] as const).map(unit => <Pressable key={unit} accessibilityRole="button" accessibilityState={{ selected: measurementUnit === unit }} onPress={() => setMeasurementUnit(unit)} style={styles.measurementListButton}><Text style={styles.measurementListButtonText}>{measurementUnit === unit ? "✓ " : ""}{unit}</Text></Pressable>)}</View>
               {measurementGroups.length === 0 ? <Text style={styles.measurementPanelEmpty}>Waiting for RoomPlan geometry…</Text> : <ScrollView style={styles.measurementList} nestedScrollEnabled>
                 {measurementGroups.map((group) => <View key={`${group.category}-${group.label}`} style={styles.measurementRow}>
-                  <View style={styles.measurementRowCopy}><Text style={styles.measurementFeature}>{group.label}</Text><Text style={styles.measurementValues}>{measurementOrder(group.category).map((dimension) => group.byDimension.get(dimension)).filter(Boolean).map((measurement) => `${measurement!.value.toFixed(2)} m`).join(" × ") || "Incomplete"}</Text></View>
+                  <View style={styles.measurementRowCopy}><Text style={styles.measurementFeature}>{group.label}</Text><Text style={styles.measurementValues}>{["wall", "floor", "ceiling", "door", "window", "opening"].includes(group.category) ? formatObjectDimensions(group.measurements, measurementUnit) : formatObjectMeasurementDetails(group.measurements, measurementUnit)}</Text></View>
                   <Text style={[styles.measurementQuality, group.quality === "stable" ? styles.qualityStable : styles.qualityLimited]}>{group.quality === "stable" ? "Stable" : group.quality === "estimating" ? "Estimating" : "Limited"}</Text>
                 </View>)}
               </ScrollView>}
@@ -304,6 +302,7 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
             <Pressable style={styles.button} onPress={() => void exportScanMeasurements()}><Text style={styles.buttonText}>Export scan estimates</Text></Pressable>
           </View>
         )}
+        {savedRoomId && <ObjectMeasurementsPanel room={project?.roomCaptures.find(room => room.id === savedRoomId)} />}
         {isFinished && <Pressable style={styles.button} onPress={onClose}><Text style={styles.buttonText}>Back to project</Text></Pressable>}
       </ScrollView>
     </SafeAreaView>

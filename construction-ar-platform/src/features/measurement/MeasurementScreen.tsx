@@ -40,6 +40,10 @@ import {
   removePlacedObjectFromProject,
   updateProjectSummary,
 } from "../../domain";
+import { canonicalTransform, composeTransforms } from "../../domain/spatialTransforms";
+import { normalizePlacedObject, placeObjectInRoom } from "../../domain/roomObjectHierarchy";
+import type { Transform3D } from "../../domain/spatial";
+import { RoomPlacementAlignment } from "./RoomPlacementAlignment";
 import type { ProjectDocument } from "../../storage/projectDocument";
 import {
   loadProjectDocuments,
@@ -140,7 +144,7 @@ function mapResolvedEndpoint(
   };
 }
 
-function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject): NativePlacedObjectSnapshot {
+function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject, worldPose: Transform3D): NativePlacedObjectSnapshot {
   const catalogObject = starterCatalog.find((item) => item.id === placedObject.catalogObjectId);
 
   return {
@@ -153,8 +157,9 @@ function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject): NativePlac
       height: placedObject.dimensions.height,
       depth: placedObject.dimensions.depth,
     },
-    position: placedObject.transform.position,
-    rotationY: placedObject.transform.rotation.yaw,
+    position: worldPose.position,
+    rotationY: worldPose.rotation.yaw,
+    transformMatrix: worldPose.matrix,
     representation: placedObject.representation ?? catalogObject?.representation,
   };
 }
@@ -167,16 +172,18 @@ function mapNativeSnapshotToPlacedObject(
   const timestamp = new Date().toISOString();
 
   return {
+    ...existingObject,
     id: snapshot.id,
     catalogObjectId: snapshot.catalogObjectId,
     roomCaptureId,
     anchorId: existingObject?.anchorId ?? `${snapshot.id}-anchor`,
     displayName: snapshot.displayName,
-    transform: {
+    transform: canonicalTransform({
       position: snapshot.position,
       rotation: { pitch: 0, yaw: snapshot.rotationY, roll: 0 },
       scale: { x: 1, y: 1, z: 1 },
-    },
+      matrix: snapshot.transformMatrix,
+    }),
     dimensions: {
       width: snapshot.dimensions.width,
       height: snapshot.dimensions.height,
@@ -352,6 +359,9 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   const [isLoading, setIsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [selectedRoomId, setSelectedRoomId] = useState<string>();
+  const [arSessionId, setARSessionId] = useState<string>();
+  const [roomAlignment, setRoomAlignment] = useState<{ roomId: string; sessionId: string; worldFromRoom: Transform3D }>();
+  const placementSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const [screenView, setScreenView] = useState<ScreenView>("measure");
   const [selectedLogEntryId, setSelectedLogEntryId] = useState<string>();
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("single");
@@ -449,10 +459,13 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
     [selectedProject, selectedRoomId],
   );
 
-  const nativePlacedObjects = useMemo(
-    () => activeRoomPlacedObjects.map(mapPlacedObjectToNativeSnapshot),
-    [activeRoomPlacedObjects],
-  );
+  const activeAlignment = roomAlignment && roomAlignment.roomId === selectedRoomId && roomAlignment.sessionId === arSessionId ? roomAlignment.worldFromRoom : undefined;
+  const nativePlacedObjects = useMemo(() => activeRoomPlacedObjects.flatMap(object => {
+    if (activeAlignment && object.roomLocalTransform) return [mapPlacedObjectToNativeSnapshot(object, composeTransforms(activeAlignment, object.roomLocalTransform))];
+    // Never replay coordinates from another AR session as if they were localized.
+    if (arSessionId && object.arSessionId === arSessionId) return [mapPlacedObjectToNativeSnapshot(object, canonicalTransform(object.transform))];
+    return [];
+  }), [activeRoomPlacedObjects, activeAlignment, arSessionId]);
 
   const activeRoomMeasurementLogEntries = useMemo(() => {
     if (!selectedProjectDocument || !selectedRoomId) {
@@ -515,13 +528,16 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   async function updateSelectedProjectDocument(
     updater: (document: ProjectDocument) => ProjectDocument,
   ) {
-    if (!selectedProjectDocument) {
-      return;
-    }
-
-    const updatedDocument = updater(selectedProjectDocument);
-    const nextDocuments = replaceProjectDocument(projectDocuments, updatedDocument);
-    await persistProjectDocuments(nextDocuments);
+    const projectId = selectedProjectDocument?.project.id;
+    if (!projectId) return;
+    const task = placementSaveQueue.current.catch(() => undefined).then(async () => {
+      const latest = await loadProjectDocuments();
+      const current = latest.find(document => document.project.id === projectId);
+      if (!current) throw new Error("Project no longer exists");
+      await persistProjectDocuments(replaceProjectDocument(latest, updater(current)));
+    });
+    placementSaveQueue.current = task;
+    try { await task; } catch (error) { setStatus(`Save failed: ${String(error)}`); }
   }
 
   function clearLiveMeasurementState(message: string) {
@@ -537,7 +553,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
     clearLiveMeasurementState(message);
   }
 
-  function persistPlacementSnapshot(snapshot: NativePlacedObjectSnapshot) {
+  function persistPlacementSnapshot(snapshot: NativePlacedObjectSnapshot, sessionId?: string) {
     const placementRoomId = selectedRoomId ?? placementRoomIdRef.current;
 
     if (!placementRoomId) {
@@ -546,7 +562,9 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
 
     void updateSelectedProjectDocument((document) => {
       const existingObject = document.project.placedObjects.find((object) => object.id === snapshot.id);
-      const placedObject = mapNativeSnapshotToPlacedObject(snapshot, placementRoomId, existingObject);
+      const mapped = mapNativeSnapshotToPlacedObject(snapshot, placementRoomId, existingObject);
+      const mapping = roomAlignment?.roomId === placementRoomId && roomAlignment.sessionId === sessionId ? roomAlignment.worldFromRoom : undefined;
+      const placedObject = normalizePlacedObject(placeObjectInRoom(mapped, mapped.transform, sessionId ?? "unknown-session", mapping), document.project);
       const nextPlacedObjects = existingObject
         ? document.project.placedObjects.map((object) =>
             object.id === placedObject.id ? placedObject : object,
@@ -654,7 +672,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
     }
 
     if (payload.placement.object) {
-      persistPlacementSnapshot(payload.placement.object);
+      persistPlacementSnapshot(payload.placement.object, payload.arSessionId);
     }
 
     if (payload.placement.kind === "object-removed" && payload.placement.objectId) {
@@ -663,7 +681,9 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   }
 
   function requestCatalogPlacement() {
-    if (!selectedCatalogObject) {
+    if (!selectedCatalogObject) return;
+    if (selectedRoom && !activeAlignment) {
+      setStatus("Align AR placements to the saved room before placing an object.");
       return;
     }
 
@@ -691,6 +711,10 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
       return;
     }
 
+    if (action === "remove") { removePlacementObject(selectedPlacedObjectId); return; }
+    if (!nativePlacedObjects.some(object => object.id === selectedPlacedObjectId)) {
+      setStatus("Align this AR session to the room before editing a saved placement."); return;
+    }
     setPlacementEditRequest({
       requestId: Date.now(),
       objectId: selectedPlacedObjectId,
@@ -805,6 +829,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   }
 
   function handleMeasurementUpdate(payload: NativeMeasurementUpdatePayload) {
+    if (payload.arSessionId) setARSessionId(payload.arSessionId);
     if (payload.furnitureIdentification) {
       setFurnitureIdentification(payload.furnitureIdentification);
     }
@@ -1161,6 +1186,11 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
               <Text style={styles.resetButtonText}>Reset room</Text>
             </Pressable>
           </View>
+          {selectedRoom && <RoomPlacementAlignment key={`${selectedRoom.id}:${arSessionId}`} room={selectedRoom} point={reticle.point} canCapture={reticle.state === "green" && !!arSessionId} aligned={!!activeAlignment} onAligned={worldFromRoom => {
+            if (arSessionId) setRoomAlignment({ roomId: selectedRoom.id, sessionId: arSessionId, worldFromRoom });
+            setStatus("AR session aligned to the room. Placements will save in room-local coordinates.");
+          }} />}
+          {activeRoomPlacedObjects.some(object => !object.roomLocalTransform) && <Text style={styles.statusText}>Some legacy placements have no recoverable room mapping. Original coordinates are retained.</Text>}
           {furnitureIdentification ? <Text style={styles.identification}>Detected suggestion: {furnitureIdentification.label} ({Math.round(furnitureIdentification.confidence * 100)}%)</Text> : null}
           <ScrollView
             horizontal
@@ -1677,7 +1707,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
               <Pressable
                 onPress={() => {
                   setIsOverflowMenuOpen(false);
-                  onClose();
+                  void placementSaveQueue.current.then(onClose).catch(() => setStatus("Save failed. Retry before closing."));
                 }}
                 style={styles.menuItem}
               >

@@ -77,8 +77,12 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     let indices: [Int32]
     let floorElevation: Float?
     let ceilingElevation: Float?
-    let boundsMin: SIMD3<Float>
-    let boundsMax: SIMD3<Float>
+    let bytesPerIndex: Int
+    let indexCountPerPrimitive: Int
+    let localBoundsMin: SIMD3<Float>
+    let localBoundsMax: SIMD3<Float>
+    let worldBoundsMin: SIMD3<Float>
+    let worldBoundsMax: SIMD3<Float>
   }
 
   private var meshStates: [UUID: MeshState] = [:]
@@ -96,6 +100,10 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   private var annotationDisplayLink: CADisplayLink?
   private var processingTask: Task<Void, Never>?
   private var lastMiniatureSignature = ""
+  private var didLogFirstFrame = false
+  private var didLogFirstMeshAnchor = false
+  private var diagnosedMeshAnchorIds: Set<UUID> = []
+  private var reportedMeshFailureKeys: Set<String> = []
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -137,7 +145,9 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   }
 
   private func configureCaptureView() {
+    NSLog("[RoomScan][Startup] configuring scanner view")
     guard RoomCaptureSession.isSupported else {
+      NSLog("[RoomScan][Startup] RoomCaptureSession is unsupported")
       notifyUnsupported()
       return
     }
@@ -151,6 +161,7 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
       let configuration = ARWorldTrackingConfiguration()
       configuration.sceneReconstruction = .meshWithClassification
       configuration.planeDetection = [.horizontal, .vertical]
+      NSLog("[RoomScan][Startup] created iOS 17 scene-reconstruction configuration")
       arSession.run(configuration)
       captureView = RoomCaptureView(frame: bounds, arSession: arSession)
     } else {
@@ -210,12 +221,18 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
 
     didStart = true
     didFinish = false
+    didLogFirstFrame = false
+    didLogFirstMeshAnchor = false
+    diagnosedMeshAnchorIds.removeAll()
+    reportedMeshFailureKeys.removeAll()
     lastProgress = 0
     scanUpdateCount = 0
     annotationSceneView.rendersContinuously = true
     miniatureSceneView.rendersContinuously = true
     measurementStates.removeAll()
     meshStates.removeAll()
+    diagnosedMeshAnchorIds.removeAll()
+    reportedMeshFailureKeys.removeAll()
     wallIds.removeAll()
     nextWallNumber = 1
     measurementAnnotationNodes.removeAll()
@@ -223,10 +240,12 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     lastMiniatureSignature = ""
     var configuration = RoomCaptureSession.Configuration()
     configuration.isCoachingEnabled = true
-    captureView.captureSession.run(configuration: configuration)
+    NSLog("[RoomScan][Startup] starting RoomCaptureSession")
     if #available(iOS 17.0, *) {
       observeARSession(captureView.captureSession.arSession)
     }
+    captureView.captureSession.run(configuration: configuration)
+    NSLog("[RoomScan][Startup] RoomCaptureSession started")
     emit(kind: "session-started", message: "Room Scan started. Move slowly around the room and include each wall and major object.", progress: 0)
   }
 
@@ -345,6 +364,10 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
 
   @available(iOS 11.0, *)
   func session(_ session: ARSession, didUpdate frame: ARFrame) {
+    if !didLogFirstFrame {
+      didLogFirstFrame = true
+      NSLog("[RoomScan][Startup] first ARFrame received")
+    }
     updateMeasurementSceneCamera(frame: frame)
     roomPlanARSessionDelegate?.session?(session, didUpdate: frame)
   }
@@ -352,7 +375,12 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   @available(iOS 11.0, *)
   func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
     if #available(iOS 17.0, *) {
-      anchors.compactMap { $0 as? ARMeshAnchor }.forEach { rememberMesh($0) }
+      let meshAnchors = anchors.compactMap { $0 as? ARMeshAnchor }
+      if !meshAnchors.isEmpty && !didLogFirstMeshAnchor {
+        didLogFirstMeshAnchor = true
+        NSLog("[RoomScan][Startup] first ARMeshAnchor received count=%d", meshAnchors.count)
+      }
+      meshAnchors.forEach { rememberMesh($0) }
     }
     roomPlanARSessionDelegate?.session?(session, didAdd: anchors)
   }
@@ -447,15 +475,19 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   }
 
   private func measurementText(values: [[String: Any]], kind: String) -> String {
-    let byDimension = Dictionary(uniqueKeysWithValues: values.compactMap { value -> (String, Float)? in guard let dimension = value["dimension"] as? String else { return nil }; return (dimension, number(value["value"])) })
-    let ordered: [String]
-    if kind == "wall" { ordered = ["width", "height"] }
-    else if kind == "floor" { ordered = ["depth", "width"] }
-    else { ordered = ["width", "height", "depth"] }
-    let entries = ordered.compactMap { byDimension[$0].map { String(format: "%.2f", $0) } }
+    var byDimension: [String: Float] = [:]
+    for item in values {
+      guard let axis = item["dimension"] as? String, let value = item["value"] as? NSNumber,
+            value.floatValue.isFinite, value.floatValue > 0 else { continue }
+      byDimension[axis] = value.floatValue
+    }
+    // RoomPlan local axes: X=width, Z=depth, Y=height, independent of camera/rotation.
+    let entries = [("width", "W"), ("depth", "D"), ("height", "H")].compactMap { axis, label in
+      byDimension[axis].map { String(format: "%@ %.2f m", label, $0) }
+    }
     guard !entries.isEmpty else { return "" }
     let prefix = kind == "wall" ? "\((values.first?["wallId"] as? String) ?? "Wall") " : ""
-    return prefix + entries.joined(separator: " × ") + "m"
+    return prefix + entries.joined(separator: " × ")
   }
 
   private func makeMeasurementAnnotation(text: String) -> SCNNode {
@@ -613,66 +645,163 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     return 0
   }
 
+  private func readMeshIndex(_ pointer: UnsafeMutableRawPointer, index: Int, bytesPerIndex: Int) -> UInt32? {
+    let address = pointer.advanced(by: index * bytesPerIndex)
+    switch bytesPerIndex {
+    case MemoryLayout<UInt16>.size:
+      var value: UInt16 = 0
+      memcpy(&value, address, MemoryLayout<UInt16>.size)
+      return UInt32(value)
+    case MemoryLayout<UInt32>.size:
+      var value: UInt32 = 0
+      memcpy(&value, address, MemoryLayout<UInt32>.size)
+      return value
+    default:
+      return nil
+    }
+  }
+
+  private func bounds(for points: [SIMD3<Float>]) -> (min: SIMD3<Float>, max: SIMD3<Float>) {
+    guard let first = points.first else {
+      return (SIMD3<Float>(repeating: 0), SIMD3<Float>(repeating: 0))
+    }
+    return points.dropFirst().reduce(into: (min: first, max: first)) { result, point in
+      result.min = SIMD3<Float>(min(result.min.x, point.x), min(result.min.y, point.y), min(result.min.z, point.z))
+      result.max = SIMD3<Float>(max(result.max.x, point.x), max(result.max.y, point.y), max(result.max.z, point.z))
+    }
+  }
+
+  private func matrixIsFinite(_ matrix: simd_float4x4) -> Bool {
+    let columns = [matrix.columns.0, matrix.columns.1, matrix.columns.2, matrix.columns.3]
+    return columns.allSatisfy { column in
+      column.x.isFinite && column.y.isFinite && column.z.isFinite && column.w.isFinite
+    }
+  }
+
+  @available(iOS 17.0, *)
+  private func reportMeshFailure(_ anchor: ARMeshAnchor, reason: String) {
+    let key = "\(anchor.identifier.uuidString)|\(reason)"
+    guard reportedMeshFailureKeys.insert(key).inserted else { return }
+    NSLog("[RoomScan][MeshDiagnostics][INVALID] anchor=%@ %@", anchor.identifier.uuidString, reason)
+  }
+
   @available(iOS 17.0, *)
   private func rememberMesh(_ anchor: ARMeshAnchor) {
-    // A bounded mesh archive keeps useful irregular architectural geometry without
-    // turning AsyncStorage into a raw scan dump. RoomPlan remains the semantic source.
+    // Each ARMeshAnchor owns its own local vertex/index space. We persist and
+    // render anchors independently, so indexes must never be combined across
+    // anchors and the anchor transform is applied exactly once on the node.
     let maxAnchors = 48
     guard meshStates[anchor.identifier] != nil || meshStates.count < maxAnchors else { return }
     let geometry = anchor.geometry
-    let storedVertexCount = min(600, geometry.vertices.count)
-    let allVertexCount = geometry.vertices.count
-    guard storedVertexCount > 0, geometry.faces.indexCountPerPrimitive == 3 else { return }
+    let vertexCount = geometry.vertices.count
+    let indexCountPerPrimitive = geometry.faces.indexCountPerPrimitive
+    let bytesPerIndex = geometry.faces.bytesPerIndex
+    guard vertexCount > 0, indexCountPerPrimitive == 3, bytesPerIndex == 2 || bytesPerIndex == 4 else {
+      reportMeshFailure(anchor, reason: "Unsupported mesh layout: vertices=\(vertexCount) indexCountPerPrimitive=\(indexCountPerPrimitive) bytesPerIndex=\(bytesPerIndex)")
+      return
+    }
+
+    // ARGeometryElement exposes no byte offset; its index buffer starts at
+    // buffer.contents(). Keep the declared primitive range bounded by the
+    // actual buffer length before any pointer arithmetic.
+    guard geometry.faces.count <= Int.max / indexCountPerPrimitive else {
+      reportMeshFailure(anchor, reason: "Invalid face primitive count")
+      return
+    }
+    let totalIndexCount = geometry.faces.count * indexCountPerPrimitive
+    let availableFaceBytes = geometry.faces.buffer.length
+    guard totalIndexCount <= availableFaceBytes / bytesPerIndex else {
+      reportMeshFailure(anchor, reason: "Face buffer is shorter than the declared index range")
+      return
+    }
+    let vertexByteWidth = MemoryLayout<SIMD3<Float>>.size
+    guard geometry.vertices.offset >= 0,
+          geometry.vertices.offset <= geometry.vertices.buffer.length,
+          geometry.vertices.stride >= vertexByteWidth,
+          geometry.vertices.offset <= geometry.vertices.buffer.length - vertexByteWidth,
+          vertexCount - 1 <= (geometry.vertices.buffer.length - geometry.vertices.offset - vertexByteWidth) / geometry.vertices.stride else {
+      reportMeshFailure(anchor, reason: "Vertex buffer is shorter than the declared vertex range")
+      return
+    }
 
     let vertexPointer = geometry.vertices.buffer.contents().advanced(by: geometry.vertices.offset)
     var vertices: [SIMD3<Float>] = []
-    vertices.reserveCapacity(storedVertexCount)
-    for index in 0..<storedVertexCount {
+    vertices.reserveCapacity(vertexCount)
+    for index in 0..<vertexCount {
       var vertex = SIMD3<Float>(repeating: 0)
       memcpy(&vertex, vertexPointer.advanced(by: index * geometry.vertices.stride), MemoryLayout<SIMD3<Float>>.size)
+      guard vertex.x.isFinite, vertex.y.isFinite, vertex.z.isFinite else {
+        reportMeshFailure(anchor, reason: "Non-finite local vertex at index \(index)")
+        return
+      }
       vertices.append(vertex)
     }
 
-    // Read the complete current anchor transiently for bounds/classification.
-    // Only the bounded subset above is retained in the persisted archive.
-    var allWorldVertices: [SIMD3<Float>] = []
-    allWorldVertices.reserveCapacity(allVertexCount)
-    for index in 0..<allVertexCount {
-      var vertex = SIMD3<Float>(repeating: 0)
-      memcpy(&vertex, vertexPointer.advanced(by: index * geometry.vertices.stride), MemoryLayout<SIMD3<Float>>.size)
-      allWorldVertices.append(worldPoint(vertex, transform: anchor.transform))
-    }
-    let boundsMin = allWorldVertices.reduce(SIMD3<Float>(repeating: .greatestFiniteMagnitude)) { current, value in
-      SIMD3<Float>(min(current.x, value.x), min(current.y, value.y), min(current.z, value.z))
-    }
-    let boundsMax = allWorldVertices.reduce(SIMD3<Float>(repeating: -.greatestFiniteMagnitude)) { current, value in
-      SIMD3<Float>(max(current.x, value.x), max(current.y, value.y), max(current.z, value.z))
+    guard matrixIsFinite(anchor.transform) else {
+      reportMeshFailure(anchor, reason: "Non-finite anchor transform")
+      return
     }
 
-    let maxIndices = min(geometry.faces.count * geometry.faces.indexCountPerPrimitive, 1800)
+    let localBounds = bounds(for: vertices)
+    let worldVertices = vertices.map { worldPoint($0, transform: anchor.transform) }
+    guard worldVertices.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else {
+      reportMeshFailure(anchor, reason: "Non-finite world vertex after applying anchor transform")
+      return
+    }
+    let maxCoordinate = (vertices + worldVertices).flatMap { [abs($0.x), abs($0.y), abs($0.z)] }.max() ?? 0
+    guard maxCoordinate <= 10_000 else {
+      reportMeshFailure(anchor, reason: "Coordinate magnitude (maxCoordinate)m exceeds the corruption sanity limit")
+      return
+    }
+    let worldBounds = bounds(for: worldVertices)
+
+    // Decode complete primitives. Filtering individual indexes is unsafe: if
+    // one corner is invalid, appending the other two changes every subsequent
+    // triangle's grouping and produces the characteristic sunburst geometry.
     let indexPointer = geometry.faces.buffer.contents()
     var indices: [Int32] = []
-    indices.reserveCapacity(maxIndices)
+    indices.reserveCapacity(totalIndexCount)
+    var invalidFaceCount = 0
+    var minimumIndex = UInt32.max
+    var maximumIndex: UInt32 = 0
+    for faceIndex in 0..<geometry.faces.count {
+      let baseIndex = faceIndex * indexCountPerPrimitive
+      guard let first = readMeshIndex(indexPointer, index: baseIndex, bytesPerIndex: bytesPerIndex),
+            let second = readMeshIndex(indexPointer, index: baseIndex + 1, bytesPerIndex: bytesPerIndex),
+            let third = readMeshIndex(indexPointer, index: baseIndex + 2, bytesPerIndex: bytesPerIndex),
+            first < UInt32(vertexCount), second < UInt32(vertexCount), third < UInt32(vertexCount) else {
+        invalidFaceCount += 1
+        continue
+      }
+      indices.append(contentsOf: [Int32(first), Int32(second), Int32(third)])
+      minimumIndex = min(minimumIndex, first, second, third)
+      maximumIndex = max(maximumIndex, first, second, third)
+    }
+    if invalidFaceCount > 0 {
+      reportMeshFailure(anchor, reason: "Skipped \(invalidFaceCount) invalid triangle primitives out of \(geometry.faces.count)")
+    }
     var floorSamples: [Float] = []
     var ceilingSamples: [Float] = []
-    let classificationPointer = geometry.classification.map { $0.buffer.contents().advanced(by: $0.offset) }
-    for index in 0..<maxIndices {
-      var value: UInt32 = 0
-      if geometry.faces.bytesPerIndex == MemoryLayout<UInt16>.size {
-        var shortValue: UInt16 = 0
-        memcpy(&shortValue, indexPointer.advanced(by: index * geometry.faces.bytesPerIndex), MemoryLayout<UInt16>.size)
-        value = UInt32(shortValue)
+    var classificationSource: ARGeometrySource?
+    var classificationPointer: UnsafeMutableRawPointer?
+    if let classification = geometry.classification {
+      let classificationIsSafe = classification.count >= geometry.faces.count
+        && classification.stride >= MemoryLayout<UInt8>.size
+        && classification.offset >= 0
+        && classification.offset <= classification.buffer.length
+        && classification.offset <= classification.buffer.length - MemoryLayout<UInt8>.size
+        && (classification.count == 0 || classification.count - 1 <= (classification.buffer.length - classification.offset - MemoryLayout<UInt8>.size) / classification.stride)
+      if classificationIsSafe {
+        classificationSource = classification
+        classificationPointer = classification.buffer.contents().advanced(by: classification.offset)
       } else {
-        memcpy(&value, indexPointer.advanced(by: index * geometry.faces.bytesPerIndex), MemoryLayout<UInt32>.size)
-      }
-      if value < UInt32(storedVertexCount) {
-        indices.append(Int32(value))
+        reportMeshFailure(anchor, reason: "Classification buffer is shorter than the declared face range")
       }
     }
     guard indices.count >= 3 else { return }
 
-    if let classification = geometry.classification, let classificationPointer {
-      let faceCount = min(geometry.faces.count, maxIndices / geometry.faces.indexCountPerPrimitive)
+    if let classification = classificationSource, let classificationPointer {
+      let faceCount = geometry.faces.count
       for faceIndex in 0..<faceCount {
         let classificationAddress = classificationPointer.advanced(by: faceIndex * classification.stride)
         var classificationValue: UInt8 = 0
@@ -680,17 +809,10 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
         let faceClassification = ARMeshClassification(rawValue: Int(classificationValue))
         let firstIndex = faceIndex * geometry.faces.indexCountPerPrimitive
         let faceIndices = (0..<geometry.faces.indexCountPerPrimitive).compactMap { offset -> Int? in
-          let indexAddress = indexPointer.advanced(by: (firstIndex + offset) * geometry.faces.bytesPerIndex)
-          if geometry.faces.bytesPerIndex == MemoryLayout<UInt16>.size {
-            var shortValue: UInt16 = 0
-            memcpy(&shortValue, indexAddress, MemoryLayout<UInt16>.size)
-            return Int(shortValue)
-          }
-          var longValue: UInt32 = 0
-          memcpy(&longValue, indexAddress, MemoryLayout<UInt32>.size)
-          return Int(longValue)
-        }.filter { $0 < allVertexCount }
-        let faceY = faceIndices.map { allWorldVertices[$0].y }
+          guard let value = readMeshIndex(indexPointer, index: firstIndex + offset, bytesPerIndex: bytesPerIndex) else { return nil }
+          return value < UInt32(vertexCount) ? Int(value) : nil
+        }
+        let faceY = faceIndices.map { worldVertices[$0].y }
         guard !faceY.isEmpty else { continue }
         switch faceClassification {
         case .floor:
@@ -709,9 +831,16 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
       indices: indices,
       floorElevation: median(floorSamples),
       ceilingElevation: median(ceilingSamples),
-      boundsMin: boundsMin,
-      boundsMax: boundsMax,
+      bytesPerIndex: bytesPerIndex,
+      indexCountPerPrimitive: indexCountPerPrimitive,
+      localBoundsMin: localBounds.min,
+      localBoundsMax: localBounds.max,
+      worldBoundsMin: worldBounds.min,
+      worldBoundsMax: worldBounds.max,
     )
+    if diagnosedMeshAnchorIds.insert(anchor.identifier).inserted {
+      NSLog("[RoomScan][MeshDiagnostics] anchor=\(anchor.identifier.uuidString) vertices=\(vertices.count) faces=\(indices.count / 3) indexes=\(indices.count) bytesPerIndex=\(bytesPerIndex) indexCountPerPrimitive=\(indexCountPerPrimitive) minIndex=\(minimumIndex == UInt32.max ? -1 : Int(minimumIndex)) maxIndex=\(maximumIndex) localBounds=\(localBounds.min)-\(localBounds.max) worldBounds=\(worldBounds.min)-\(worldBounds.max) transform=\(anchor.transform)")
+    }
   }
 
   private func serialize(_ room: CapturedRoom) -> [String: Any] {
@@ -724,6 +853,14 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
       elements.append(contentsOf: room.floors.map { serializeSurface($0, kind: "floor") })
     }
     elements.append(contentsOf: room.objects.map(serializeObject))
+    #if DEBUG
+    if ProcessInfo.processInfo.environment["CONSTRUCTION_AR_TRANSFORM_DIAGNOSTICS"] == "1" {
+      NSLog("[RoomTransform][Capture] room=\(room.identifier) container=\(matrix_identity_float4x4) frame=ARKit-world Y-up meters")
+      for element in elements {
+        NSLog("[RoomTransform][Capture] component=\(element)")
+      }
+    }
+    #endif
     let capturedAt = ISO8601DateFormatter().string(from: Date())
 
     let wallAssessments = room.walls.map { assessWallHeight($0, in: room) }
@@ -765,8 +902,13 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
           "transform": transform(from: mesh.transform),
           "vertices": mesh.vertices.map(vector),
           "indices": mesh.indices.map(Int.init),
+          "faceCount": mesh.indices.count / mesh.indexCountPerPrimitive,
+          "indexCount": mesh.indices.count,
+          "bytesPerIndex": mesh.bytesPerIndex,
+          "indexCountPerPrimitive": mesh.indexCountPerPrimitive,
           "classification": "unclassified-architectural-mesh",
-          "bounds": ["min": vector(mesh.boundsMin), "max": vector(mesh.boundsMax)],
+          "bounds": ["min": vector(mesh.localBoundsMin), "max": vector(mesh.localBoundsMax)],
+          "worldBounds": ["min": vector(mesh.worldBoundsMin), "max": vector(mesh.worldBoundsMax)],
         ]
         if let floorElevation = mesh.floorElevation { result["floorElevation"] = floorElevation }
         if let ceilingElevation = mesh.ceilingElevation { result["ceilingElevation"] = ceilingElevation }
@@ -788,6 +930,12 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
     if #available(iOS 17.0, *) {
       result["polygonCorners"] = surface.polygonCorners.map(vector)
     }
+    #if DEBUG
+    if ProcessInfo.processInfo.environment["CONSTRUCTION_AR_TRANSFORM_DIAGNOSTICS"] == "1" {
+      let source = surface.transform
+      NSLog("[RoomTransform][Capture] kind=\(kind) id=\(surface.identifier) localPosition=\(position(from: source)) worldPosition=\(position(from: source)) localQuaternion=\(simd_quatf(source).vector) worldQuaternion=\(simd_quatf(source).vector) dimensions=\(surface.dimensions) parent=\(matrix_identity_float4x4) source=\(source)")
+    }
+    #endif
     if kind == "wall" { result["wallId"] = wallDisplayId(for: surface.identifier) }
     return result
   }
@@ -932,8 +1080,8 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
   private func logWallDiagnostics(_ wall: CapturedRoom.Surface, assessment: WallHeightAssessment) {
     let wallCenter = position(from: wall.transform)
     let meshBounds = meshStates.values.reduce(into: (minY: Float.greatestFiniteMagnitude, maxY: -Float.greatestFiniteMagnitude)) { result, mesh in
-      result.minY = min(result.minY, mesh.boundsMin.y)
-      result.maxY = max(result.maxY, mesh.boundsMax.y)
+      result.minY = min(result.minY, mesh.worldBoundsMin.y)
+      result.maxY = max(result.maxY, mesh.worldBoundsMax.y)
     }
     let displayed = measurementStates["scan-measurement-\(wall.identifier.uuidString)-height"]?.value ?? assessment.value
     NSLog("[RoomScan][WallDiagnostics] id=%@ rawDimensions=(%.3f, %.3f, %.3f)m transformCenter=(%.3f, %.3f, %.3f) rawBoundsY=(%.3f, %.3f) floor=%@ ceiling=%@ meshBoundsY=(%.3f, %.3f) calculated=%.3f displayed=%.3f quality=%@ source=%@", wall.identifier.uuidString, wall.dimensions.x, wall.dimensions.y, wall.dimensions.z, wallCenter.x, wallCenter.y, wallCenter.z, assessment.rawBottom, assessment.rawTop, assessment.floorElevation.map { String(format: "%.3f", $0) } ?? "nil", assessment.ceilingElevation.map { String(format: "%.3f", $0) } ?? "nil", meshBounds.minY.isFinite ? meshBounds.minY : .nan, meshBounds.maxY.isFinite ? meshBounds.maxY : .nan, assessment.value, displayed, assessment.quality, assessment.valueSource)
@@ -1073,11 +1221,24 @@ final class RoomScanView: UIView, RoomCaptureViewDelegate, RoomCaptureSessionDel
 
   private func transform(from matrix: simd_float4x4) -> [String: Any] {
     let position = position(from: matrix)
-    let yaw = atan2(matrix.columns.0.z, matrix.columns.0.x)
+    // Keep the complete rigid transform. The previous implementation reduced
+    // RoomPlan's matrix to a hand-derived yaw, which inverted SceneKit's yaw
+    // convention and discarded pitch/roll. Reconstructing rooms from that
+    // lossy representation made walls and features appear skewed in the saved
+    // 3D viewer and made room alignment unreliable.
+    let rotationNode = SCNNode()
+    rotationNode.simdTransform = matrix
+    let eulerAngles = rotationNode.eulerAngles
     return [
       "position": vector(position),
-      "rotation": ["pitch": 0, "yaw": yaw, "roll": 0],
+      "rotation": ["pitch": eulerAngles.x, "yaw": eulerAngles.y, "roll": eulerAngles.z],
       "scale": ["x": 1, "y": 1, "z": 1],
+      "matrix": [
+        matrix.columns.0.x, matrix.columns.1.x, matrix.columns.2.x, matrix.columns.3.x,
+        matrix.columns.0.y, matrix.columns.1.y, matrix.columns.2.y, matrix.columns.3.y,
+        matrix.columns.0.z, matrix.columns.1.z, matrix.columns.2.z, matrix.columns.3.z,
+        matrix.columns.0.w, matrix.columns.1.w, matrix.columns.2.w, matrix.columns.3.w,
+      ],
     ]
   }
 

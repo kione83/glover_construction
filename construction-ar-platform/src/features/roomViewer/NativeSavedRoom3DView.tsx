@@ -10,6 +10,7 @@ export interface SceneSelectionEvent {
 export interface RoomTransformChangeEvent {
   roomId: string;
   transform: {
+    matrix?: number[];
     position: { x: number; y: number; z: number };
     rotation: { pitch: number; yaw: number; roll: number };
     scale: { x: number; y: number; z: number };
@@ -19,12 +20,16 @@ export interface RoomTransformChangeEvent {
 interface NativeSavedRoom3DViewProps {
   style?: StyleProp<ViewStyle>;
   modelJSON: string;
+  roomTransformsJSON: string;
+  lockedRoomId?: string;
+  assemblyMode: boolean;
   selectedRoomId?: string;
   selectedFeatureIdsJSON: string;
   editingRoomId?: string;
   allowDirectManipulation: boolean;
   showMeasurements: boolean;
   resetRequestId: number;
+  focusRequestId: number;
   onSceneSelection?: (event: NativeSyntheticEvent<SceneSelectionEvent>) => void;
   onRoomTransformChange?: (event: NativeSyntheticEvent<RoomTransformChangeEvent>) => void;
 }

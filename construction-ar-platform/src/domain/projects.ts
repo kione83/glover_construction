@@ -8,6 +8,7 @@ import type {
   Transform3D,
   Vec3,
 } from "./spatial";
+import { composeTransforms, relativeTransform } from "./spatialTransforms";
 
 export type ProjectStatus = "draft" | "scanned" | "layout-in-progress" | "validated" | "archived";
 
@@ -81,14 +82,15 @@ export type RoomScanRepresentation =
   | "stairs"
   | "generic-object";
 
-export interface RoomScanTransform {
-  position: Vec3;
-  rotation: RotationEuler;
-  scale: Vec3;
-}
+export interface RoomScanTransform extends Transform3D {}
 
 export interface RoomScanElement {
   id: string;
+  /** Existing element is the spatial instance; its captured transform is unchanged. */
+  roomCaptureId?: string;
+  objectTypeId?: string;
+  /** Object -> captured-room frame. Original RoomPlan transform remains untouched. */
+  roomLocalTransform?: Transform3D;
   wallId?: string;
   kind: RoomScanElementKind;
   category: string;
@@ -97,6 +99,27 @@ export interface RoomScanElement {
   transform: RoomScanTransform;
   confidence?: number;
   polygonCorners?: Vec3[];
+}
+
+export interface ScannedObjectMeasurements {
+  /** Object-local axes, never camera/world bounds. Missing geometry is null. */
+  dimensions: { width: number | null; depth: number | null; height: number | null; unit: "m" };
+  dimensionStatus: Record<"width" | "depth" | "height", "estimated" | "limited" | "unknown">;
+  /** Square meters and cubic meters respectively; bounding-box estimates only. */
+  footprintArea: number | null;
+  faceArea: number | null;
+  boundingVolume: number | null;
+}
+
+export interface ScannedObjectType extends ScannedObjectMeasurements {
+  id: string;
+  roomCaptureId: string;
+  category: string;
+  kind: RoomScanElementKind;
+  representation: RoomScanRepresentation;
+  /** Representative metadata, not an average or replacement for instance geometry. */
+  representativeInstanceId: string;
+  quantity: number;
 }
 
 export type RoomScanMeasurementDimension = "width" | "height" | "depth";
@@ -140,8 +163,13 @@ export interface RoomScanMeshAnchor {
   transform: Transform3D;
   vertices: Vec3[];
   indices: number[];
+  faceCount?: number;
+  indexCount?: number;
+  bytesPerIndex?: 2 | 4;
+  indexCountPerPrimitive?: 3;
   classification?: string;
   bounds?: { min: Vec3; max: Vec3 };
+  worldBounds?: { min: Vec3; max: Vec3 };
   floorElevation?: number;
   ceilingElevation?: number;
 }
@@ -161,6 +189,9 @@ export interface RoomScanData {
   floorFootprint?: Dimensions3D;
   ceilingHeight?: number;
   elements: RoomScanElement[];
+  /** Shared metadata only. Every physical instance remains in elements. */
+  objectTypes?: ScannedObjectType[];
+  objectMetadataVersion?: 1;
   measurements?: RoomScanMeasurement[];
   /** JSON-encoded Codable CapturedRoom retained for native re-opening/export. */
   nativeCapturedRoomJSON?: string;
@@ -192,6 +223,9 @@ export interface RoomConnection {
 }
 
 export interface ProjectSpatialModel {
+  /** Rooms with an explicitly initialized assembly placement (including identity). */
+  assemblyRoomIds?: string[];
+  lockedRoomId?: string;
   coordinateSystem: "project-local";
   roomTransforms: Record<string, Transform3D>;
   connections: RoomConnection[];
@@ -239,6 +273,16 @@ export interface PlacedObject {
   anchorId: string;
   displayName: string;
   transform: Transform3D;
+  /** Canonical object -> parent room; never contains the assembly transform. */
+  roomLocalTransform?: Transform3D;
+  transformSpace?: "room-local" | "project-local" | "ar-world";
+  spatialStatus?: "room-local" | "needs-alignment";
+  /** Catalog type remains separate from observed scan objectTypes. */
+  objectTypeId?: string;
+  objectMeasurements?: ScannedObjectMeasurements;
+  arSessionId?: string;
+  /** Evidence for this placement's AR session, not a reusable map for future sessions. */
+  arWorldFromRoom?: Transform3D;
   dimensions: Dimensions3D;
   status: "active" | "deleted";
   placedAt: string;
@@ -363,6 +407,8 @@ export function identityTransform(): Transform3D {
 }
 
 export function composeYawTransforms(parent: Transform3D, relative: Transform3D): Transform3D {
+  // Preserve the old yaw-only API for legacy callers; new matrix records use SceneKit composition.
+  if (parent.matrix || relative.matrix) return composeTransforms(parent, relative);
   const yaw = parent.rotation.yaw;
   const cos = Math.cos(yaw);
   const sin = Math.sin(yaw);
@@ -383,6 +429,7 @@ export function composeYawTransforms(parent: Transform3D, relative: Transform3D)
 
 /** Convert a project-space child transform to a transform relative to its parent. */
 export function relativeYawTransform(parent: Transform3D, child: Transform3D): Transform3D {
+  if (parent.matrix || child.matrix) return relativeTransform(parent, child) ?? identityTransform();
   const deltaX = child.position.x - parent.position.x;
   const deltaZ = child.position.z - parent.position.z;
   const inverseYaw = -parent.rotation.yaw;
@@ -408,9 +455,11 @@ export function relativeYawTransform(parent: Transform3D, child: Transform3D): T
 }
 
 export function setRoomProjectTransform(project: Project, roomId: string, transform: Transform3D): Project {
+  if (project.spatialModel?.lockedRoomId === roomId) return project;
   return {
     ...project,
     spatialModel: {
+      ...project.spatialModel,
       coordinateSystem: "project-local",
       roomTransforms: {
         ...(project.spatialModel?.roomTransforms ?? {}),
@@ -439,9 +488,11 @@ export function connectRoomsInProject(
   project: Project,
   connection: Omit<RoomConnection, "createdAt"> & { createdAt?: string },
 ): Project {
+  if (connection.childRoomId === connection.parentRoomId || project.spatialModel?.lockedRoomId === connection.childRoomId) return project;
   const parentTransform = project.spatialModel?.roomTransforms[connection.parentRoomId] ?? identityTransform();
   const childTransform = composeYawTransforms(parentTransform, connection.transform);
   const spatialModel: ProjectSpatialModel = {
+    ...project.spatialModel,
     coordinateSystem: "project-local",
     roomTransforms: {
       ...(project.spatialModel?.roomTransforms ?? {}),
@@ -461,6 +512,7 @@ export function addRoomToSpatialModel(project: Project, roomId: string): Project
   return {
     ...project,
     spatialModel: {
+      ...project.spatialModel,
       coordinateSystem: "project-local",
       roomTransforms: {
         ...(project.spatialModel?.roomTransforms ?? {}),
@@ -501,6 +553,8 @@ export function removeRoomFromProject(project: Project, roomId: string): Project
       ? {
           ...project.spatialModel,
           roomTransforms: remainingTransforms,
+          assemblyRoomIds: project.spatialModel.assemblyRoomIds?.filter(id => id !== roomId),
+          lockedRoomId: project.spatialModel.lockedRoomId === roomId ? undefined : project.spatialModel.lockedRoomId,
           connections: project.spatialModel.connections.filter(
             (connection) => connection.parentRoomId !== roomId && connection.childRoomId !== roomId,
           ),
@@ -513,7 +567,8 @@ export function clearSavedRoomScansFromProject(project: Project): Project {
   const scanRoomIds = new Set(
     project.roomCaptures.filter((room) => room.source === "roomplan" || room.roomScan).map((room) => room.id),
   );
-  return scanRoomIds.size === 0
-    ? project
-    : scanRoomIds.values().reduce((current, roomId) => removeRoomFromProject(current, roomId), project);
+  return Array.from(scanRoomIds).reduce(
+    (current, roomId) => removeRoomFromProject(current, roomId),
+    project,
+  );
 }
