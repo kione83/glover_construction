@@ -66,7 +66,7 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
   const [isSavingProject, setIsSavingProject] = useState(false);
   const mutationCount = useRef(0);
   const mutationQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const pendingPhoto = useRef<{ uri: string; id: string } | undefined>(undefined);
+  const pendingPhoto = useRef<{ uri: string; id: string; capturedAt: string } | undefined>(undefined);
   const [storageError, setStorageError] = useState<string>();
   const [alternativeName, setAlternativeName] = useState("");
   const [isNamingAlternative, setIsNamingAlternative] = useState(false);
@@ -233,11 +233,11 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
 
   async function addProjectPhoto(uri: string): Promise<void> {
     if (!selectedProject) throw new Error("Select a project before saving this photo.");
+    if (pendingPhoto.current?.uri !== uri) pendingPhoto.current = { uri, id: `photo-${Date.now()}`, capturedAt: new Date().toISOString() };
     const documents = await loadProjectDocuments();
     const current = documents.find(document => document.project.id === selectedProject.id);
     if (!current) throw new Error("This project is no longer available.");
-    if (pendingPhoto.current?.uri !== uri) pendingPhoto.current = { uri, id: `photo-${Date.now()}` };
-    const photo = { id: pendingPhoto.current.id, uri, capturedAt: new Date().toISOString() };
+    const photo = { id: pendingPhoto.current.id, uri, capturedAt: pendingPhoto.current.capturedAt };
     const project = updateProjectSummary({ ...current.project, photos: [photo, ...current.project.photos.filter(item => item.id !== photo.id)] });
     await saveProjectDocuments(documents.map(document => document.project.id === project.id ? { ...document, project } : document));
     pendingPhoto.current = undefined;

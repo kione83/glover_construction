@@ -260,3 +260,27 @@ describe("project documentation persistence", () => {
     expect(documents[0].project.fieldNotes).toHaveLength(0);
   });
 });
+
+describe("photo retry provenance", () => {
+  it("retains the photo identity and capture time when a write is retried later", async () => {
+    const openCamera = vi.fn();
+    await act(async () => { renderer = create(<HomeScreen initialProjectId="B" onProjectChange={() => {}} onOpenMeasure={() => {}} onOpenCamera={openCamera} onOpenStream={() => {}} onOpenRoomScan={() => {}} onOpenRoomViewer={() => {}} />); });
+    await press("Capture photo");
+    const capture = openCamera.mock.calls[0][0];
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-01T23:00:00Z"));
+      mocks.load.mockRejectedValueOnce(new Error("Storage unavailable"));
+      await expect(capture("file:///tmp/same-photo.jpg")).rejects.toThrow("Storage unavailable");
+      vi.setSystemTime(new Date("2026-10-01T23:01:00Z"));
+      mocks.save.mockRejectedValueOnce(new Error("Disk full"));
+      await expect(capture("file:///tmp/same-photo.jpg")).rejects.toThrow("Disk full");
+      const first = mocks.save.mock.calls.at(-1)![0][1].project.photos[0];
+      vi.setSystemTime(new Date("2026-10-01T23:05:00Z"));
+      await capture("file:///tmp/same-photo.jpg");
+      expect(documents[1].project.photos).toHaveLength(1);
+      expect(documents[1].project.photos[0]).toMatchObject({ id: first.id, capturedAt: "2026-10-01T23:00:00.000Z" });
+      expect(documents[0].project.photos).toHaveLength(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
