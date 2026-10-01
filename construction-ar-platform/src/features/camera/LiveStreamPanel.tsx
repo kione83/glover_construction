@@ -88,6 +88,8 @@ export function LiveStreamPanel({ compact = false, disabledReason, layoutItems =
   const streamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const isPublishingRef = useRef(false);
+  const latestLayout = useRef({ type: "layout", items: layoutItems, roomScan, rooms: projectRooms, spatialModel, liveMeasurements });
+  latestLayout.current = { type: "layout", items: layoutItems, roomScan, rooms: projectRooms, spatialModel, liveMeasurements };
   const layoutChannelRef = useRef<ReturnType<RTCPeerConnection["createDataChannel"]> | null>(null);
 
   function sendSignal(message: SignalMessage) {
@@ -98,14 +100,7 @@ export function LiveStreamPanel({ compact = false, disabledReason, layoutItems =
 
   function sendLayout() {
     if (layoutChannelRef.current?.readyState === "open") {
-      layoutChannelRef.current.send(JSON.stringify({
-        type: "layout",
-        items: layoutItems,
-        roomScan,
-        rooms: projectRooms,
-        spatialModel,
-        liveMeasurements,
-      }));
+      layoutChannelRef.current.send(JSON.stringify(latestLayout.current));
     }
   }
 
@@ -113,25 +108,39 @@ export function LiveStreamPanel({ compact = false, disabledReason, layoutItems =
     sendLayout();
   }, [layoutItems, roomScan, projectRooms, spatialModel, liveMeasurements]);
 
-  async function startCameraStream(peerConnection: RTCPeerConnection) {
-    const stream = await mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: "environment",
-        frameRate: 24,
-        width: 1280,
-        height: 720,
-      },
-    });
-    streamRef.current = stream;
-    stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+  async function offerToViewer() {
+    const stream = streamRef.current;
+    const socket = socketRef.current;
+    if (!stream || !socket || socket.readyState !== WebSocket.OPEN) return;
+    // A rejoining browser creates a new receiving peer. Start a matching publisher
+    // peer too, without reacquiring the camera or retaining old ICE candidates.
+    peerConnectionRef.current?.close();
+    queuedCandidatesRef.current = [];
+    const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    peerConnectionRef.current = peer;
+    const channel = peer.createDataChannel("construction-layout");
+    layoutChannelRef.current = channel;
+    channel.onopen = sendLayout;
+    stream.getTracks().forEach(track => peer.addTrack(track, stream));
+    peer.onicecandidate = (event: { candidate: RTCIceCandidate | null }) => {
+      if (peerConnectionRef.current === peer && event.candidate) sendSignal({ type: "candidate", candidate: event.candidate.toJSON() });
+    };
+    const offer = await peer.createOffer({});
+    if (peerConnectionRef.current !== peer || socketRef.current !== socket) return;
+    await peer.setLocalDescription(offer);
+    if (peerConnectionRef.current !== peer || socketRef.current !== socket) return;
+    sendSignal({ type: "offer", sdp: offer });
+    setStatus("Viewer joined. Connecting live view…");
   }
 
   async function handleSignalMessage(message: SignalMessage) {
+    if (message.type === "viewer-ready") { await offerToViewer(); return; }
     if (message.type === "answer" && message.sdp && peerConnectionRef.current) {
-      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(message.sdp));
+      const peer = peerConnectionRef.current;
+      await peer.setRemoteDescription(new RTCSessionDescription(message.sdp));
+      if (peerConnectionRef.current !== peer) return;
       for (const candidate of queuedCandidatesRef.current) {
-        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
       }
       queuedCandidatesRef.current = [];
       setStatus("Streaming live view while measuring.");
@@ -173,40 +182,39 @@ export function LiveStreamPanel({ compact = false, disabledReason, layoutItems =
 
     socket.onopen = async () => {
       try {
-        const peerConnection = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        });
-        peerConnectionRef.current = peerConnection;
-        const layoutChannel = peerConnection.createDataChannel("construction-layout");
-        layoutChannelRef.current = layoutChannel;
-        layoutChannel.onopen = sendLayout;
-        peerConnection.onicecandidate = (event: { candidate: RTCIceCandidate | null }) => {
-          if (event.candidate) {
-            sendSignal({ type: "candidate", room, role: "publisher", candidate: event.candidate.toJSON() });
-          }
-        };
-        await startCameraStream(peerConnection);
-        const offer = await peerConnection.createOffer({});
-        await peerConnection.setLocalDescription(offer);
+        const stream = await mediaDevices.getUserMedia({ audio: false, video: { facingMode: "environment", frameRate: 24, width: 1280, height: 720 } });
+        if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        streamRef.current = stream;
         sendSignal({ type: "join", room, role: "publisher" });
-        sendSignal({ type: "offer", room, role: "publisher", sdp: offer });
         isPublishingRef.current = true;
         setIsPublishing(true);
         setStatus("Waiting for the laptop viewer to join.");
       } catch (error) {
+        if (socketRef.current !== socket) return;
         setStatus(error instanceof Error ? error.message : "Could not start streaming.");
         stopPublishing();
       }
     };
 
     socket.onmessage = (event) => {
-      void handleSignalMessage(JSON.parse(event.data));
+      if (socketRef.current !== socket) return;
+      void (async () => {
+        try { await handleSignalMessage(JSON.parse(event.data)); }
+        catch (error) {
+          if (socketRef.current !== socket) return;
+          stopPublishing();
+          setStatus(error instanceof Error ? error.message : "Stream negotiation failed. Retry Stream.");
+        }
+      })();
     };
-    socket.onerror = () => setStatus("Signal connection failed. Check Wi-Fi and the ws:// URL.");
+    socket.onerror = () => { if (socketRef.current !== socket) return; stopPublishing(); setStatus("Signal connection failed. Check Wi-Fi and the ws:// URL."); };
     socket.onclose = () => {
-      if (isPublishingRef.current) {
-        setStatus("Signal connection closed.");
-      }
+      if (socketRef.current !== socket) return;
+      stopPublishing();
+      setStatus("Signal connection closed. Retry Stream to reconnect.");
     };
   }
 
@@ -218,7 +226,6 @@ export function LiveStreamPanel({ compact = false, disabledReason, layoutItems =
       socketRef.current.onclose = null;
       socketRef.current.close();
     }
-    socketRef.current?.close();
     socketRef.current = null;
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
