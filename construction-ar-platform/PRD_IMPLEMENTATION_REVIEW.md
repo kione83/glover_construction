@@ -2,6 +2,26 @@
 
 Review date: September 25, 2026.
 
+## October 1, 2026 second-session update
+
+The second session verified the previous work against the actual code and added:
+
+| Requirement | Result | Remaining limitation |
+| --- | --- | --- |
+| FR-8 (page 5) | Named independent design alternatives with their own scan archives/media, preserved relationships, and source provenance. | No chronological version history or side-by-side comparison. |
+| FR-3/13/14/19–23 (pages 5–6) | Compatible observed-surface placement, orientation and contact offsets; saved room-local surface evidence; native mounting-normal rotation. | Physical LiDAR/AR classification and fresh-session acceptance still required. No world-map relocalization. |
+| FR-21–23 (page 6) | Proposed size and clearance envelopes checked against scanned furniture, fixtures and built-ins using saved assembly poses. | Approximate semantic bounds only; walls, openings, mesh and uncaptured obstacles excluded. |
+| FR-9–11 (page 5) | Shared searchable, trade-filtered catalog with dimensions and mounting metadata. | Manufacturer-specific realistic assets still missing. |
+| FR-30, NFR-3 (pages 7–8) | Complete paged note/photo history, note search, room/object associations, full-size photo preview, retryable note/photo writes and awaited camera persistence. | Physical camera/photo preview acceptance and durable unsaved drafts remain. |
+| Existing stream defect | Embedded publisher waits for viewer-ready, negotiates a new peer on rejoin, and cleans up delayed camera starts after Stop. | Mocked transport tests only; no live two-device WebRTC acceptance. |
+
+All six implementation waves are committed and pushed on the existing development
+branch. The full Release simulator build passes. Interface checks demonstrated
+project creation, room-linked notes, independent duplication, catalog search and
+selection, source isolation and persistence across relaunch. See
+`SESSION_2026-10-01_2148.md` for complete evidence, timing and follow-on priorities.
+The September assessment and first-session update below are historical.
+
 ## October 1, 2026 implementation update
 
 The September review below is retained as the pre-session assessment. The

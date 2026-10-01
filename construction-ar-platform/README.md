@@ -130,11 +130,55 @@ Devices without RoomPlan support show a limitation message and do not save a
 scan. Existing AR measurement and placement workflows remain available as the
 fallback for those devices.
 
+## Design alternatives, catalog and documentation
+
+Use **Duplicate as design alternative** on a selected project, give the copy a
+name, and choose **Create alternative**. The new project opens automatically.
+Each copy owns its scan archives, photos and plans; rooms, placements, assembly
+relationships and measurement history are retained. Edit either design without
+changing the other. A missing scan archive or failed copy is reported before a
+new project is committed. Alternatives are snapshots, not a version-history or
+side-by-side comparison system.
+
+The dashboard and AR workspace share a searchable catalog. Search by product
+name, SKU, tag or trade, combine that search with a trade filter, and inspect the
+selected object's dimensions and mounting requirements before opening placement.
+Current products are generic planning representations, not manufacturer assets.
+
+Field notes can be attached to the project, a room or a proposed object. Search
+all notes by content or location, and use **Show more notes/photos** to reach the
+complete history. Open a site photo for native full-size inspection and zoom.
+Notes keep their location label if the referenced room/object is later removed.
+Failed note writes retain the editor draft; failed photo writes retain the
+captured image for retry. The camera returns to the dashboard only after saving.
+Unsaved retry data remains in memory and is not guaranteed across force-quit.
+
+## Surface-aware placement and fit review
+
+After aligning AR to the saved room, aim at an AR-recognized compatible floor,
+wall or ceiling. Mounted products use the observed support orientation and are
+offset so their mounting face, rather than their center, touches the surface.
+Rotations stay around the support normal. Weak tracking, unclassified planes and
+unsupported surfaces produce retry guidance. Free-placement products still use
+a stable tracked target. Rebuilding the native iOS app is required.
+
+Observed surface evidence is stored in room coordinates and reprojected after
+fresh-session alignment. Moving an object in the saved-model viewer invalidates
+its physical attachment claim until it is placed against an observed surface
+again. Recognition and alignment stability require supported-device acceptance.
+
+Fit review includes proposed-object envelopes and their planning clearances
+against captured furniture, fixtures and built-ins, including saved assembly
+edits. These are approximate bounding-envelope checks; walls, openings, meshes,
+uncaptured obstacles and comprehensive construction-code clearances are not
+checked. Verify the actual space before installation.
+
 ## Verification
 
 Run `npx tsc --noEmit` for TypeScript and `npm test` for domain, storage, and React
 workflow tests. Run `python3 tools/test-room-transforms.py` for native SceneKit
-regressions, and build the iOS workspace for full native integration.
+regressions, `python3 tools/test-mounting-transforms.py` for production mounting
+math and the iOS AR-view typecheck, and build the iOS workspace for full native integration.
 
 `python3 tools/build-review-ui-harness.py /tmp/construction-review-qa` compiles
 an isolated simulator-only QA app from the production saved viewer and document
