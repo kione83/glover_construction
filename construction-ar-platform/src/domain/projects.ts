@@ -89,6 +89,8 @@ export interface RoomScanElement {
   /** Existing element is the spatial instance; its captured transform is unchanged. */
   roomCaptureId?: string;
   objectTypeId?: string;
+  /** Explicit RoomPlan object parent; poses remain in the captured-room frame. */
+  parentObjectId?: string;
   /** Object -> captured-room frame. Original RoomPlan transform remains untouched. */
   roomLocalTransform?: Transform3D;
   wallId?: string;
@@ -228,6 +230,8 @@ export interface ProjectSpatialModel {
   lockedRoomId?: string;
   coordinateSystem: "project-local";
   roomTransforms: Record<string, Transform3D>;
+  /** Optional saved-viewer overrides: room ID → scanned element ID → room-local pose. */
+  objectTransforms?: Record<string, Record<string, Transform3D>>;
   connections: RoomConnection[];
 }
 
@@ -535,6 +539,8 @@ export function removeRoomFromProject(project: Project, roomId: string): Project
   );
   const remainingTransforms = { ...(project.spatialModel?.roomTransforms ?? {}) };
   delete remainingTransforms[roomId];
+  const remainingObjectTransforms = { ...project.spatialModel?.objectTransforms };
+  delete remainingObjectTransforms[roomId];
   return {
     ...project,
     roomCaptures: project.roomCaptures.filter((room) => room.id !== roomId),
@@ -553,6 +559,7 @@ export function removeRoomFromProject(project: Project, roomId: string): Project
       ? {
           ...project.spatialModel,
           roomTransforms: remainingTransforms,
+          objectTransforms: remainingObjectTransforms,
           assemblyRoomIds: project.spatialModel.assemblyRoomIds?.filter(id => id !== roomId),
           lockedRoomId: project.spatialModel.lockedRoomId === roomId ? undefined : project.spatialModel.lockedRoomId,
           connections: project.spatialModel.connections.filter(

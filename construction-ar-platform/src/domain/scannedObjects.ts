@@ -1,5 +1,6 @@
 import type { Dimensions3D, LengthUnit } from "./spatial";
 import type { RoomCapture, RoomScanData, RoomScanElement, RoomScanMeasurement, ScannedObjectMeasurements, ScannedObjectType } from "./projects";
+import { scannedObjectParents } from "./scannedObjectAssemblies";
 import { formatMetricPower, METERS_PER_LENGTH_UNIT } from "./measurementUnits";
 import { canonicalTransform, capturedTransform } from "./spatialTransforms";
 
@@ -82,6 +83,7 @@ function similar(a: ScannedObjectMeasurements, b: ScannedObjectMeasurements): bo
  * Sorting only the grouping candidates makes definitions deterministic on reload.
  */
 export function normalizeScanObjects(scan: RoomScanData, roomCaptureId: string): RoomScanData {
+  const parents = scannedObjectParents(scan);
   const groups: { type: ScannedObjectType; members: ScannedObjectMeasurements[] }[] = [];
   const references = new Map<string, string>();
   for (const element of [...(scan.elements ?? [])].filter(isScannedObject).sort((a, b) => a.id.localeCompare(b.id))) {
@@ -108,7 +110,7 @@ export function normalizeScanObjects(scan: RoomScanData, roomCaptureId: string):
     objectMetadataVersion: 1,
     objectTypes: groups.map(group => group.type),
     elements: (scan.elements ?? []).map(element => isScannedObject(element)
-      ? { ...element, roomCaptureId, objectTypeId: references.get(element.id), roomLocalTransform: element.roomLocalTransform ? canonicalTransform(element.roomLocalTransform) : capturedTransform(element.transform) }
+      ? { ...element, parentObjectId: parents.get(element.id), roomCaptureId, objectTypeId: references.get(element.id), roomLocalTransform: element.roomLocalTransform ? canonicalTransform(element.roomLocalTransform) : capturedTransform(element.transform) }
       : element),
   };
 }

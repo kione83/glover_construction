@@ -21,6 +21,7 @@ interface NativeSavedRoom3DViewProps {
   style?: StyleProp<ViewStyle>;
   modelJSON: string;
   roomTransformsJSON: string;
+  objectTransformsJSON: string;
   lockedRoomId?: string;
   assemblyMode: boolean;
   selectedRoomId?: string;

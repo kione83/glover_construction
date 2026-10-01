@@ -19,6 +19,7 @@ import { colors } from "../../theme/colors";
 import { normalizeScanObjects, measurementsForLiveObject, formatObjectDimensions, formatObjectMeasurementDetails } from "../../domain/scannedObjects";
 import { ObjectMeasurementsPanel } from "./ObjectMeasurementsPanel";
 import type { LengthUnit } from "../../domain/spatial";
+import { ControlDrawer } from "../workspace/ControlDrawer";
 import { LiveStreamPanel } from "../camera/LiveStreamPanel";
 import {
   NativeRoomScanView,
@@ -77,6 +78,7 @@ function toRoomCapture(project: Project, name: string, scan: RoomScanData): Room
 }
 
 export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
+  const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [project, setProject] = useState<Project>();
   const [roomName, setRoomName] = useState("Room Scan");
   const [status, setStatus] = useState("Preparing Room Scan…");
@@ -172,6 +174,7 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
     setLiveMeasurements([]);
     setStatus("Room Scan saved to this project. The room can be reconstructed without scanning again.");
     setIsFinished(true);
+    setDrawerExpanded(true);
   }
 
   function handleNativeUpdate(event: { nativeEvent: NativeRoomScanUpdate }) {
@@ -258,8 +261,10 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
           <Text style={styles.statusText}>{status}</Text>
           <View style={styles.progressTrack}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /></View>
         </View>
+        {!isFinished && <Pressable accessibilityRole="button" accessibilityLabel="Finish and save scan" onPress={() => setFinishRequestId(value => value + 1)} style={styles.floatingFinish}><Text style={styles.finishButtonText}>Finish & save</Text></Pressable>}
       </View>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ControlDrawer expanded={drawerExpanded} onChange={setDrawerExpanded} label="Scan controls">
+      <ScrollView contentContainerStyle={styles.content} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled">
         {!isFinished && (
           <View style={styles.controls}>
             <Text style={styles.label}>Saved room name</Text>
@@ -305,6 +310,7 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
         {savedRoomId && <ObjectMeasurementsPanel room={project?.roomCaptures.find(room => room.id === savedRoomId)} />}
         {isFinished && <Pressable style={styles.button} onPress={onClose}><Text style={styles.buttonText}>Back to project</Text></Pressable>}
       </ScrollView>
+      </ControlDrawer>
     </SafeAreaView>
   );
 }
@@ -318,8 +324,9 @@ const styles = StyleSheet.create({
   title: { color: colors.surface, fontSize: 28, fontWeight: "800" },
   closeButton: { borderWidth: 1, borderColor: colors.lightBlue, paddingHorizontal: 12, paddingVertical: 8 },
   closeButtonText: { color: colors.surface, fontWeight: "700" },
-  viewport: { flex: 1, minHeight: 300, backgroundColor: colors.navy, overflow: "hidden" },
-  statusOverlay: { position: "absolute", left: 16, right: 16, bottom: 16, padding: 12, backgroundColor: "rgba(11,35,65,.9)" },
+  viewport: { flex: 1, minHeight: 100, backgroundColor: colors.navy, overflow: "hidden" },
+  statusOverlay: { position: "absolute", left: 16, right: 16, top: 12, padding: 12, backgroundColor: "rgba(11,35,65,.9)" },
+  floatingFinish: { position: "absolute", bottom: 12, right: 16, backgroundColor: colors.navy, borderRadius: 18, borderWidth: 1, borderColor: colors.lightBlue, padding: 14 },
   statusText: { color: colors.surface, fontSize: 14, fontWeight: "700" },
   progressTrack: { height: 4, marginTop: 8, backgroundColor: colors.border },
   progressBar: { height: 4, backgroundColor: colors.accent },
@@ -343,7 +350,7 @@ const styles = StyleSheet.create({
   measurementValues: { color: colors.muted, fontSize: 12, marginTop: 2 },
   measurementQuality: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
   qualityStable: { color: "#2d7a52" },
-  qualityLimited: { color: "#a9681a" },
+  qualityLimited: { color: colors.muted },
   streamSection: { gap: 6, marginTop: 4 },
   streamTitle: { color: colors.text, fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
   summary: { gap: 8 },

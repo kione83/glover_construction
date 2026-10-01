@@ -16,6 +16,9 @@ import { colors } from "../../theme/colors";
 import { savedRoomModel } from "../../domain/savedRoomModel";
 import { alignRoomFeatures, canonicalTransform, capturedTransform, relativeTransform } from "../../domain/spatialTransforms";
 import { formatObjectMeasurementDetails } from "../../domain/scannedObjects";
+import { ControlDrawer } from "../workspace/ControlDrawer";
+import { PlacementControls } from "../workspace/PlacementControls";
+import { editableScanObject, moveScanObject, viewerObjectTransforms, type ObjectPlacements } from "../../domain/viewerPlacement";
 import { ObjectMeasurementsPanel } from "../roomScan/ObjectMeasurementsPanel";
 import { NativeSavedRoom3DView, savedRoom3DViewAvailable, type SceneSelectionEvent } from "./NativeSavedRoom3DView";
 
@@ -49,6 +52,9 @@ function connectionTypeFor(feature?: RoomScanElement): "door" | "doorway" | "sha
 }
 
 export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: SavedRoomViewerScreenProps) {
+  const [drawerExpanded, setDrawerExpanded] = useState(false);
+  const [objectTransforms, setObjectTransforms] = useState<ObjectPlacements>({});
+  const [placementActive, setPlacementActive] = useState(false);
   const [project, setProject] = useState<Project>();
   const [selectedRoomId, setSelectedRoomId] = useState(roomId);
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([]);
@@ -69,8 +75,8 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   const [step, setStep] = useState(0.1);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveRevision = useRef(0);
-  const latestLayout = useRef({ transforms: draftTransforms, lockedRoomId });
-  latestLayout.current = { transforms: draftTransforms, lockedRoomId };
+  const latestLayout = useRef({ transforms: draftTransforms, lockedRoomId, objects: objectTransforms });
+  latestLayout.current = { transforms: draftTransforms, lockedRoomId, objects: objectTransforms };
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +95,7 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
           ? [roomId ?? defaultRoomA].filter(Boolean)
           : [defaultRoomA, defaultRoomB].filter(Boolean);
       setLockedRoomId(metadataProject.spatialModel?.lockedRoomId);
+      setObjectTransforms(metadataProject.spatialModel?.objectTransforms ?? {});
       setProject(metadataProject);
       setDraftTransforms(transforms);
       setRoomAId(defaultRoomA);
@@ -112,10 +119,11 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   // Geometry crosses the bridge once per loaded model. Placement updates use a
   // separate small prop; dragging never rebuilds walls/meshes/annotations.
   const modelJSON = useMemo(() => project && loaded ? JSON.stringify(savedRoomModel(project, mode, roomId)) : JSON.stringify({ rooms: [] }), [project, loaded, mode, roomId]);
+  const objectTransformsJSON = useMemo(() => JSON.stringify(viewerObjectTransforms(project, objectTransforms)), [project, objectTransforms]);
   const transformsJSON = useMemo(() => JSON.stringify(mode === "room" ? {} : draftTransforms), [mode, draftTransforms]);
 
   async function saveLayout() {
-    if (mode === "room" || !loaded) return;
+    if (!loaded) return;
     const snapshot = latestLayout.current;
     const revision = ++saveRevision.current;
     setSaveStatus("Saving…");
@@ -124,7 +132,7 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
       const documents = await loadProjectDocuments({ includeScans: false });
       if (!documents.some(d => d.project.id === projectId)) throw new Error("Project no longer exists");
       await saveProjectDocuments(documents.map(d => d.project.id === projectId ? {
-        ...d, project: updateProjectSummary(saveAssemblyToProject(d.project, snapshot.transforms, snapshot.lockedRoomId)),
+        ...d, project: updateProjectSummary({ ...d.project, spatialModel: { ...(mode === "room" ? d.project.spatialModel! : saveAssemblyToProject(d.project, snapshot.transforms, snapshot.lockedRoomId).spatialModel!), objectTransforms: snapshot.objects } }),
       } : d));
     });
     saveQueue.current = task;
@@ -133,12 +141,12 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   }
 
   useEffect(() => {
-    if (mode === "room" || !loaded) return;
+    if (!loaded) return;
     ++saveRevision.current;
     setSaveStatus("Unsaved changes");
     const timer = setTimeout(() => { void saveLayout().catch(() => undefined); }, 500);
     return () => clearTimeout(timer);
-  }, [draftTransforms, lockedRoomId, loaded, mode]);
+  }, [draftTransforms, objectTransforms, lockedRoomId, loaded, mode]);
 
   async function closeViewer() {
     try { await saveLayout(); onClose(); }
@@ -149,13 +157,15 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
     if (!project) return;
     Alert.alert("Reset assembly?", "Return rooms to separate starting positions and unlock the reference. Room scans and measurements are kept.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Reset assembly", onPress: () => { setDraftTransforms(initialAssemblyTransforms(project, true)); setLockedRoomId(undefined); setMoveMode(false); setResetRequestId(v => v + 1); } },
+      { text: "Reset assembly", onPress: () => { setDraftTransforms(initialAssemblyTransforms(project, true)); setLockedRoomId(undefined); setMoveMode(false); setPlacementActive(false); setResetRequestId(v => v + 1); } },
     ]);
   }
   const selectedFeatureIdsForNative = [featureAId, featureBId].filter(Boolean);
 
   function handleSelection(event: { nativeEvent: SceneSelectionEvent }) {
     const selection = event.nativeEvent;
+    setPlacementActive(selection.kind !== "background");
+    if (selection.kind === "background") { setSelectedRoomId(undefined); setSelectedFeatureIds([]); return; }
     if (selection.roomId) {
       if (selection.roomId !== selectedRoomId) setMoveMode(false);
       setSelectedRoomId(selection.roomId);
@@ -223,6 +233,28 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
     } catch { Alert.alert("Alignment not saved", "Please retry saving the alignment."); }
   }
 
+  const selectedObject = editableScanObject(project, selectedRoomId, selectedFeatureIds[0]);
+  const selectedCatalogObject = project?.placedObjects.find(object => `placed:${object.id}` === selectedFeatureIds[0]);
+  const canPlace = placementActive && !selectedCatalogObject && (selectedObject ? mode !== "alignment" : mode === "project" && !!lockedRoomId && !!selectedRoomId && selectedRoomId !== lockedRoomId);
+  function manipulate(x: number, z: number, direction = 0) {
+    if (!canPlace || !project || !selectedRoomId) return;
+    const yaw = direction * (step === 0.01 ? 1 : 5) * Math.PI / 180;
+    if (selectedObject) setObjectTransforms(current => moveScanObject(project, current, selectedRoomId, selectedObject.id, x * step, z * step, yaw));
+    else { if (x) adjust("x", x * step); if (z) adjust("z", z * step); if (yaw) adjust("yaw", yaw); }
+  }
+  function precisionAdjust(axis: "x" | "y" | "z" | "yaw", amount: number) {
+    if (selectedCatalogObject) return;
+    if (selectedObject && project && selectedRoomId) {
+      if (axis === "y") return;
+      setPlacementActive(true);
+      setObjectTransforms(current => moveScanObject(project, current, selectedRoomId, selectedObject.id, axis === "x" ? amount : 0, axis === "z" ? amount : 0, axis === "yaw" ? amount : 0));
+    } else if (lockedRoomId) adjust(axis, amount);
+  }
+  async function confirmPlacement() {
+    setPlacementActive(false); setMoveMode(false);
+    try { await saveLayout(); } catch { Alert.alert("Placement not saved", "Use Save layout to retry."); }
+  }
+
   const selectedRoom = project?.roomCaptures.find((room) => room.id === selectedRoomId);
   const selectedPlacements = project?.placedObjects.filter(object => object.status === "active" && object.roomCaptureId === selectedRoomId) ?? [];
   const selectedRoomName = selectedRoom ? selectedRoom.name || `Room ${(project?.roomCaptures.filter(r => r.roomScan).indexOf(selectedRoom) ?? 0) + 1}` : "Select a room";
@@ -231,42 +263,50 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   return <SafeAreaView style={styles.screen}>
     <View style={styles.header}><View><Text style={styles.eyebrow}>{mode === "project" ? "ROOM ASSEMBLY" : "SAVED ROOM"}</Text><Text style={styles.title}>{title}</Text></View><Pressable onPress={() => void closeViewer()} style={styles.close}><Text style={styles.closeText}>Close</Text></Pressable></View>
     {!savedRoom3DViewAvailable && <Text style={styles.warning}>The interactive 3D viewer requires the iOS development build. The saved scan data remains intact.</Text>}
-    <NativeSavedRoom3DView style={styles.viewer} modelJSON={modelJSON} roomTransformsJSON={transformsJSON} lockedRoomId={lockedRoomId} assemblyMode={mode === "project"} selectedRoomId={selectedRoomId} selectedFeatureIdsJSON={JSON.stringify(mode === "alignment" ? selectedFeatureIdsForNative : selectedFeatureIds)} editingRoomId={mode === "alignment" ? roomBId : mode === "project" ? selectedRoomId : undefined} allowDirectManipulation={(mode === "alignment" && moveMode) || (mode === "project" && moveMode && !!lockedRoomId && selectedRoomId !== lockedRoomId)} showMeasurements={showMeasurements} resetRequestId={resetRequestId} focusRequestId={focusRequestId} onSceneSelection={handleSelection} onRoomTransformChange={(event) => updateDraftTransform(event.nativeEvent.roomId, event.nativeEvent.transform)} />
+    <View style={styles.viewer}>
+    <NativeSavedRoom3DView style={StyleSheet.absoluteFill} objectTransformsJSON={objectTransformsJSON} modelJSON={modelJSON} roomTransformsJSON={transformsJSON} lockedRoomId={lockedRoomId} assemblyMode={mode === "project"} selectedRoomId={selectedRoomId} selectedFeatureIdsJSON={JSON.stringify(mode === "alignment" ? selectedFeatureIdsForNative : selectedObject ? [selectedObject.id] : selectedFeatureIds)} editingRoomId={mode === "alignment" ? roomBId : mode === "project" ? selectedRoomId : undefined} allowDirectManipulation={mode === "alignment" && moveMode} showMeasurements={showMeasurements} resetRequestId={resetRequestId} focusRequestId={focusRequestId} onSceneSelection={handleSelection} onRoomTransformChange={(event) => updateDraftTransform(event.nativeEvent.roomId, event.nativeEvent.transform)} />
+      {mode !== "alignment" && <>
+        <View pointerEvents="none" style={styles.selectionOverlay}><Text style={styles.selectionText}>{selectedCatalogObject ? `${selectedCatalogObject.displayName} · Measurements only` : selectedObject ? `${selectedRoomName} · ${selectedObject.category}` : selectedRoomName}{!selectedObject && selectedRoomId === lockedRoomId ? " · Locked" : ""}{!placementActive && selectedRoomId ? " · Placed" : ""}</Text></View>
+        <PlacementControls enabled={!!canPlace} targetKey={`${selectedRoomId}:${selectedObject?.id ?? "room"}`} precision={step === 0.01} onPrecision={() => setStep(value => value === 0.01 ? 0.1 : 0.01)} onMove={(x, z) => manipulate(x, z)} onRotate={direction => manipulate(0, 0, direction)} onPlace={() => void confirmPlacement()} />
+      </>}
+    </View>
+    <ControlDrawer expanded={drawerExpanded} onChange={setDrawerExpanded} label="Model controls">
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.toolbar}><Text style={styles.helper}>{mode === "project" ? (moveMode ? "Drag to move the active room. Twist two fingers to rotate. Select rooms by name when they overlap." : "Orbit and pinch to inspect. Tap the frontmost room or choose its name below. Tap a surface to focus its measurements.") : "Orbit, pan, and pinch to inspect. Tap a room or feature to select it."}</Text><View style={styles.buttonRow}><Button label="Focus room" disabled={!selectedRoomId} onPress={() => setFocusRequestId(value => value + 1)} /><Button label="Reset view" onPress={() => setResetRequestId((value) => value + 1)} /><Button label={showMeasurements ? "Hide measurements" : "Show measurements"} onPress={() => setShowMeasurements((value) => !value)} /></View></View>
+      <View style={styles.toolbar}><Text style={styles.helper}>{mode === "project" ? "Orbit, pan and pinch to inspect. Tap furniture to edit it, or a surface / room name to select a room. Use the joystick to place; camera gestures never move the selection." : "Orbit, pan, and pinch to inspect. Tap a room or feature to select it."}</Text><View style={styles.buttonRow}><Button label="Focus room" disabled={!selectedRoomId} onPress={() => setFocusRequestId(value => value + 1)} /><Button label="Reset view" onPress={() => setResetRequestId((value) => value + 1)} /><Button label={showMeasurements ? "Hide measurements" : "Show measurements"} onPress={() => setShowMeasurements((value) => !value)} /></View></View>
       {mode === "alignment" && <>
         <View style={styles.panel}><Text style={styles.section}>1. Select rooms</Text><RoomChips rooms={project.roomCaptures.filter((room) => room.roomScan)} value={roomAId} onChange={setRoomAId} label="Room A" /><RoomChips rooms={project.roomCaptures.filter((room) => room.roomScan)} value={roomBId} onChange={setRoomBId} label="Room B" /></View>
         <View style={styles.panel}><Text style={styles.section}>2. Select architectural features</Text><FeatureChips label="Room A feature" features={featureList(roomA)} value={featureAId} onChange={setFeatureAId} /><FeatureChips label="Room B feature" features={featureList(roomB)} value={featureBId} onChange={setFeatureBId} /><Button label="Align selected features" onPress={alignSelectedFeatures} /><Text style={styles.helper}>Doors, openings, walls, corners, floors, landings, and stair geometry are eligible. Furniture is never used as an anchor.</Text></View>
         <View style={styles.panel}><Text style={styles.section}>3. Fine adjustment · Room B</Text><Button label={moveMode ? "Camera controls" : "Move Room B"} disabled={roomBId === lockedRoomId} onPress={() => setMoveMode(v => !v)} /><Text style={styles.helper}>Directly drag the highlighted Room B where supported, or use 1 cm / 1° increments.</Text><View style={styles.adjustGrid}>{[["X −", "x", -0.01], ["X +", "x", 0.01], ["Y −", "y", -0.01], ["Y +", "y", 0.01], ["Z −", "z", -0.01], ["Z +", "z", 0.01], ["Yaw −", "yaw", -Math.PI / 180], ["Yaw +", "yaw", Math.PI / 180]].map(([label, axis, amount]) => <Button key={String(label)} label={String(label)} onPress={() => adjust(axis as "x" | "y" | "z" | "yaw", Number(amount))} />)}</View><Button label="Save room-to-project alignment" onPress={() => void saveAlignment()} /></View>
       </>}
       {mode === "project" && <View style={styles.panel}>
-        <RoomChips rooms={project.roomCaptures.filter(r => r.roomScan)} value={selectedRoomId ?? ""} onChange={id => { setSelectedRoomId(id); setSelectedFeatureIds([]); setMoveMode(false); }} label="Active room" lockedRoomId={lockedRoomId} />
+        <RoomChips rooms={project.roomCaptures.filter(r => r.roomScan)} value={selectedRoomId ?? ""} onChange={id => { setSelectedRoomId(id); setSelectedFeatureIds([]); setMoveMode(false); setPlacementActive(true); }} label="Active room" lockedRoomId={lockedRoomId} />
         <Text style={styles.section}>{selectedRoomName}{selectedRoomId === lockedRoomId ? " · Locked reference" : ""}</Text>
         <View style={styles.buttonRow}>
           <Button label={selectedRoomId === lockedRoomId ? "Unlock room" : "Lock room in place"} disabled={!selectedRoomId || (!!lockedRoomId && selectedRoomId !== lockedRoomId)} onPress={() => { setLockedRoomId(selectedRoomId === lockedRoomId ? undefined : selectedRoomId); setMoveMode(false); }} />
-          <Button label={moveMode ? "Camera controls" : "Move / rotate"} disabled={!lockedRoomId || !selectedRoomId || selectedRoomId === lockedRoomId} onPress={() => setMoveMode(v => !v)} />
+          <Button label="Move / rotate room" disabled={!lockedRoomId || !selectedRoomId || selectedRoomId === lockedRoomId} onPress={() => { setSelectedFeatureIds([]); setPlacementActive(true); setMoveMode(true); }} />
           <Button label={toolsExpanded ? "Hide precision tools" : "Precision tools"} onPress={() => setToolsExpanded(v => !v)} />
         </View>
         {!lockedRoomId && <Text style={styles.helper}>Lock a reference room to begin assembling the others.</Text>}
         {lockedRoomId && selectedRoomId !== lockedRoomId && <Text style={styles.helper}>Reference: {project.roomCaptures.find(r => r.id === lockedRoomId)?.name || lockedRoomId}. Unlock it before choosing a different reference.</Text>}
         {toolsExpanded && <>
-          <Text style={styles.helper}>Assembly axes · X left/right · Z forward/back · Y elevation</Text>
+          <Text style={styles.helper}>{selectedObject ? `${selectedObject.category} · Room-local X/Z · Fixed elevation` : "Room assembly axes · X left/right · Z forward/back · Y elevation"}</Text>
           <View style={styles.buttonRow}>{[0.01, 0.1, 1].map(value => <Button key={value} label={`${step === value ? "✓ " : ""}${value} m`} onPress={() => setStep(value)} />)}</View>
-          <View style={styles.adjustGrid}>{(["x", "z", "y"] as const).flatMap(axis => [-1, 1].map(sign => <Button key={`${axis}${sign}`} label={`${axis.toUpperCase()} ${sign > 0 ? "+" : "−"}`} disabled={!lockedRoomId || selectedRoomId === lockedRoomId} onPress={() => adjust(axis, sign * step)} />))}</View>
-          <View style={styles.adjustGrid}>{[-90, -5, -1, 1, 5, 90].map(degrees => <Button key={degrees} label={`${degrees > 0 ? "+" : ""}${degrees}°`} disabled={!lockedRoomId || selectedRoomId === lockedRoomId} onPress={() => adjust("yaw", degrees * Math.PI / 180)} />)}</View>
+          <View style={styles.adjustGrid}>{(["x", "z", "y"] as const).flatMap(axis => [-1, 1].map(sign => <Button key={`${axis}${sign}`} label={`${axis.toUpperCase()} ${sign > 0 ? "+" : "−"}`} disabled={!!selectedCatalogObject || (selectedObject ? axis === "y" : !lockedRoomId || selectedRoomId === lockedRoomId)} onPress={() => precisionAdjust(axis, sign * step)} />))}</View>
+          <View style={styles.adjustGrid}>{[-90, -5, -1, 1, 5, 90].map(degrees => <Button key={degrees} label={`${degrees > 0 ? "+" : ""}${degrees}°`} disabled={!!selectedCatalogObject || (!selectedObject && (!lockedRoomId || selectedRoomId === lockedRoomId))} onPress={() => precisionAdjust("yaw", degrees * Math.PI / 180)} />)}</View>
         </>}
         <View style={styles.buttonRow}><Button label="Save layout" onPress={() => { void saveLayout().catch(() => Alert.alert("Save failed", "Please try again. Your scans are safe.")); }} /><Button label="Reset assembly" onPress={resetAssembly} /></View>
         <Text style={styles.helper}>{saveStatus} · Auto-saves placement changes</Text>
       </View>}
-      {mode === "room" && <View style={styles.panel}><Text style={styles.section}>{selectedRoom?.name ?? "Room"}</Text><Text style={styles.helper}>This model is reconstructed from the saved RoomPlan-derived geometry and native CapturedRoom archive. No new scan is started.</Text>{selectedRoom?.roomScan?.arkitMesh && <Text style={styles.helper}>Bounded ARKit mesh retained: {selectedRoom.roomScan.arkitMesh.anchors.length} architectural mesh anchors.</Text>}</View>}
+      {mode === "room" && <View style={styles.panel}><Button label="Save layout" onPress={() => { void saveLayout().catch(() => Alert.alert("Save failed", "Please retry.")); }} /><Text style={styles.helper}>{saveStatus}</Text><Text style={styles.section}>{selectedRoom?.name ?? "Room"}</Text><Text style={styles.helper}>This model is reconstructed from the saved RoomPlan-derived geometry and native CapturedRoom archive. No new scan is started.</Text>{selectedRoom?.roomScan?.arkitMesh && <Text style={styles.helper}>Bounded ARKit mesh retained: {selectedRoom.roomScan.arkitMesh.anchors.length} architectural mesh anchors.</Text>}</View>}
       {selectedPlacements.some(object => !object.roomLocalTransform) && <Text style={styles.warning}>Some legacy placements need room alignment. Their original coordinates are preserved; they are not overlaid at an invented room position.</Text>}
       {showMeasurements && selectedPlacements.length > 0 && <View style={styles.panel}><Text style={styles.section}>Placed objects</Text>{selectedPlacements.map(object => <View key={object.id} style={styles.field}>
         <Button label={object.displayName} disabled={!object.roomLocalTransform} onPress={() => setSelectedFeatureIds([`placed:${object.id}`])} />
         {object.objectMeasurements && <Text style={styles.helper}>{formatObjectMeasurementDetails(object.objectMeasurements)}</Text>}
         {!object.roomLocalTransform && <Text style={styles.helper}>Room alignment required</Text>}
       </View>)}</View>}
-      {showMeasurements && mode !== "alignment" && <ObjectMeasurementsPanel room={selectedRoom} selectedInstanceId={selectedFeatureIds[0]} onSelectInstance={id => setSelectedFeatureIds([id])} />}
+      {showMeasurements && mode !== "alignment" && <ObjectMeasurementsPanel room={selectedRoom} selectedInstanceId={selectedFeatureIds[0]} onSelectInstance={id => { setSelectedFeatureIds([id]); setPlacementActive(true); }} />}
     </ScrollView>
+    </ControlDrawer>
   </SafeAreaView>;
 }
 
@@ -280,4 +320,4 @@ function FeatureChips({ features, value, onChange, label }: { features: RoomScan
 
 function Button({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) { return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.button, disabled && { opacity: 0.4 }]}><Text style={styles.buttonText}>{label}</Text></Pressable>; }
 
-const styles = StyleSheet.create({ screen: { flex: 1, backgroundColor: colors.background }, center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background }, header: { padding: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.border }, eyebrow: { color: colors.accent, fontSize: 11, fontWeight: "800", letterSpacing: 1 }, title: { color: colors.text, fontSize: 24, fontWeight: "800", marginTop: 5 }, close: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 9 }, closeText: { color: colors.text, fontWeight: "700" }, viewer: { height: 390, margin: 12, backgroundColor: "#111827", borderWidth: 1, borderColor: colors.border }, content: { padding: 12, gap: 12, paddingBottom: 32 }, toolbar: { gap: 10 }, buttonRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, button: { alignSelf: "flex-start", backgroundColor: colors.accent, paddingHorizontal: 12, paddingVertical: 9 }, buttonText: { color: colors.surface, fontWeight: "800", fontSize: 12 }, panel: { gap: 10, padding: 13, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }, section: { color: colors.text, fontSize: 15, fontWeight: "800" }, field: { gap: 6 }, label: { color: colors.text, fontSize: 12, fontWeight: "700" }, chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 }, chip: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, paddingVertical: 7, backgroundColor: colors.surface }, chipSelected: { borderColor: colors.accent, backgroundColor: colors.lightBlue }, chipText: { color: colors.text, fontSize: 11, fontWeight: "700" }, helper: { color: colors.muted, fontSize: 12, lineHeight: 18 }, text: { color: colors.text }, warning: { marginHorizontal: 12, marginTop: 10, color: "#9a6514", fontSize: 12 }, adjustGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, roomLine: { flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderColor: colors.border, paddingVertical: 8 }, selectedLine: { borderColor: colors.accent }, roomSelect: { flex: 1 }, roomName: { color: colors.text, fontWeight: "800", marginBottom: 3 } });
+const styles = StyleSheet.create({ screen: { flex: 1, backgroundColor: colors.background }, center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background }, header: { padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.border }, eyebrow: { color: colors.accent, fontSize: 11, fontWeight: "800", letterSpacing: 1 }, title: { color: colors.text, fontSize: 20, fontWeight: "800", marginTop: 3 }, close: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 9 }, closeText: { color: colors.text, fontWeight: "700" }, viewer: { flex: 1, minHeight: 120, backgroundColor: "#111827" }, selectionOverlay: { position: "absolute", top: 10, left: 12, right: 12, alignItems: "center" }, selectionText: { color: colors.surface, backgroundColor: colors.navy, padding: 8, borderRadius: 12, fontSize: 12, fontWeight: "700" }, content: { padding: 12, gap: 12, paddingBottom: 32 }, toolbar: { gap: 10 }, buttonRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, button: { alignSelf: "flex-start", backgroundColor: colors.accent, paddingHorizontal: 12, paddingVertical: 9 }, buttonText: { color: colors.surface, fontWeight: "800", fontSize: 12 }, panel: { gap: 10, padding: 13, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }, section: { color: colors.text, fontSize: 15, fontWeight: "800" }, field: { gap: 6 }, label: { color: colors.text, fontSize: 12, fontWeight: "700" }, chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 }, chip: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, paddingVertical: 7, backgroundColor: colors.surface }, chipSelected: { borderColor: colors.accent, backgroundColor: colors.lightBlue }, chipText: { color: colors.text, fontSize: 11, fontWeight: "700" }, helper: { color: colors.muted, fontSize: 12, lineHeight: 18 }, text: { color: colors.text }, warning: { marginHorizontal: 12, marginTop: 10, color: colors.muted, fontSize: 12 }, adjustGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, roomLine: { flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderColor: colors.border, paddingVertical: 8 }, selectedLine: { borderColor: colors.accent }, roomSelect: { flex: 1 }, roomName: { color: colors.text, fontWeight: "800", marginBottom: 3 } });

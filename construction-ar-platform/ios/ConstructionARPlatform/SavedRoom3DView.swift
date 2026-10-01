@@ -10,6 +10,7 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
   @objc var selectedRoomId: String? { didSet { refreshSelection() } }
   @objc var selectedFeatureIdsJSON: String = "[]" { didSet { refreshSelection() } }
   @objc var roomTransformsJSON: String = "{}" { didSet { applyAssemblyTransforms() } }
+  @objc var objectTransformsJSON: String = "{}" { didSet { applyObjectTransforms() } }
   @objc var lockedRoomId: String? { didSet { refreshSelection() } }
   @objc var assemblyMode: Bool = false
   @objc var editingRoomId: String?
@@ -152,6 +153,20 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     updateAnnotations()
   }
 
+  private func applyObjectTransforms() {
+    guard let data = objectTransformsJSON.data(using: .utf8),
+          let rooms = try? JSONSerialization.jsonObject(with: data) as? [String: [String: [String: Any]]] else { return }
+    SCNTransaction.begin(); SCNTransaction.animationDuration = 0
+    for (roomId, objects) in rooms {
+      guard let room = roomNodes[roomId] else { continue }
+      for (id, transform) in objects {
+        guard finiteTransform(transform), let node = room.childNode(withName: "object|\(roomId)|\(id)", recursively: false) ?? room.childNode(withName: "feature|\(roomId)|\(id)", recursively: false) else { continue }
+        apply(transform, to: node)
+      }
+    }
+    SCNTransaction.commit(); updateAnnotations()
+  }
+
   private func rebuildIfNeeded(force: Bool = false) {
     guard window != nil else { return }
     guard force || modelJSON != lastModelJSON || roomNodes.isEmpty else { refreshSelection(); return }
@@ -175,6 +190,7 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     for room in rooms { buildRoom(room) }
     #endif
     applyAssemblyTransforms()
+    applyObjectTransforms()
     if shouldFitCamera { resetCamera() }
     addProjectGrid(); refreshSelection()
   }
@@ -186,6 +202,7 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     if debugRenderMode != "anchors" && debugRenderMode != "merged", let scan = room["roomScan"] as? [String: Any], let elements = scan["elements"] as? [[String: Any]] {
       let measurements = scan["measurements"] as? [[String: Any]] ?? []
       for element in elements { buildElement(element, roomId: roomId, parent: roomNode, measurements: measurements) }
+      buildObjectRoots(elements, roomId: roomId, parent: roomNode)
     }
     // Proposed placements share the room parent but are not part of the captured archive.
     if let objects = room["placedObjects"] as? [[String: Any]] {
@@ -208,6 +225,24 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
     addAnnotation(anchor: anchor, roomId: roomId, title: room["name"] as? String ?? "Room", dimensions: room["roomDimensionsLabel"] as? String ?? "", summary: true)
     contentNode.addChildNode(roomNode); roomNodes[roomId] = roomNode
     logComponent(kind: "room", id: roomId, node: roomNode, source: room["transform"], dimensions: nil)
+  }
+
+  /// One movable owner per captured assembly. Component geometry and annotation
+  /// anchors retain their relative matrices; no meshes or hit targets are copied.
+  private func buildObjectRoots(_ elements: [[String: Any]], roomId: String, parent: SCNNode) {
+    for element in elements {
+      guard let id = element["id"] as? String, let rootId = element["objectRootId"] as? String,
+            let transform = element["objectRootTransform"] as? [String: Any],
+            finiteTransform(transform), let matrix = simdMatrix(from: transform), abs(simd_determinant(matrix)) > 1e-10,
+            let component = parent.childNode(withName: "feature|\(roomId)|\(id)", recursively: false) else { continue }
+      let name = "object|\(roomId)|\(rootId)"
+      let root: SCNNode
+      if let existing = parent.childNode(withName: name, recursively: false) { root = existing }
+      else { root = SCNNode(); root.name = name; root.simdTransform = matrix; parent.addChildNode(root) }
+      let local = simd_inverse(root.simdTransform) * component.simdTransform
+      root.addChildNode(component)
+      component.simdTransform = local
+    }
   }
 
   private func buildElement(_ element: [String: Any], roomId: String, parent: SCNNode, measurements: [[String: Any]]) {
@@ -792,7 +827,7 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
 
   private func refreshSelection() {
     let data = selectedFeatureIdsJSON.data(using: .utf8) ?? Data(); let selectedFeatures = (try? JSONSerialization.jsonObject(with: data) as? [String]) ?? []
-    for roomNode in roomNodes.values { roomNode.enumerateChildNodes { node, _ in guard let identity = self.sceneIdentity(for: node) else { return }; let selected = identity.roomId == self.selectedRoomId || (identity.featureId.map(selectedFeatures.contains) ?? false); node.geometry?.firstMaterial?.emission.contents = selected ? UIColor(red: 0.22, green: 0.42, blue: 0.65, alpha: 1) : identity.roomId == self.lockedRoomId ? UIColor(red: 0.10, green: 0.17, blue: 0.24, alpha: 1) : UIColor.clear } }
+    for roomNode in roomNodes.values { roomNode.enumerateChildNodes { node, _ in guard let identity = self.sceneIdentity(for: node) else { return }; let selected = identity.roomId == self.selectedRoomId && (selectedFeatures.isEmpty || (identity.featureId.map(selectedFeatures.contains) ?? false)); node.geometry?.firstMaterial?.emission.contents = selected ? UIColor(red: 0.22, green: 0.42, blue: 0.65, alpha: 1) : identity.roomId == self.lockedRoomId ? UIColor(red: 0.10, green: 0.17, blue: 0.24, alpha: 1) : UIColor.clear } }
   }
 
   private func resetCamera() { fitCamera(to: Array(roomNodes.values)) }
@@ -891,6 +926,20 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
 
   private func number(_ value: Any?) -> Float { if let value = value as? NSNumber { return value.floatValue }; if let value = value as? Double { return Float(value) }; return 0 }
   private struct SceneIdentity { let roomId: String; let featureId: String? }
-  private func sceneIdentity(for node: SCNNode?) -> SceneIdentity? { var current = node; while let candidate = current { let parts = (candidate.name ?? "").split(separator: "|").map(String.init); if parts.first == "feature", parts.count >= 3 { return SceneIdentity(roomId: parts[1], featureId: parts[2]) }; if parts.first == "room", parts.count >= 2 { return SceneIdentity(roomId: parts[1], featureId: nil) }; current = candidate.parent }; return nil }
+  private func sceneIdentity(for node: SCNNode?) -> SceneIdentity? {
+    var current = node
+    var feature: SceneIdentity?
+    while let candidate = current {
+      let parts = (candidate.name ?? "").split(separator: "|").map(String.init)
+      // A hit on any descendant selects the entire editable assembly. This
+      // identity also drives highlights and projected measurement callouts.
+      if parts.first == "object", parts.count >= 3 { return SceneIdentity(roomId: parts[1], featureId: parts[2]) }
+      if parts.first == "feature", parts.count >= 3, feature == nil { feature = SceneIdentity(roomId: parts[1], featureId: parts[2]) }
+      if parts.first == "room", parts.count >= 2 { return feature ?? SceneIdentity(roomId: parts[1], featureId: nil) }
+      current = candidate.parent
+    }
+    return feature
+  }
+
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 }

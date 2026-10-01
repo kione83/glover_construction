@@ -198,3 +198,19 @@ describe("projectRepository", () => {
   });
 
 });
+
+
+describe("saved viewer object overrides", () => {
+  it("saves and reloads furniture poses through the project repository", async () => {
+    vi.clearAllMocks();
+    mocks.getInfoAsync.mockResolvedValue({ exists: false });
+    const document = createEmptyProjectDocument({ id: "object-layout", name: "Object layout", roomCaptures: structuredClone(roomsJSON) as RoomCapture[] });
+    const roomId = document.project.roomCaptures[0].id;
+    const pose = moveAssemblyRoom(identityTransform(), "x", 0.35);
+    document.project.spatialModel!.objectTransforms = { [roomId]: { chair: pose } };
+    await saveProjectDocuments([document]);
+    mocks.asyncStorage.getItem.mockResolvedValue(mocks.asyncStorage.setItem.mock.calls.at(-1)![1]);
+    const [reopened] = await loadProjectDocuments();
+    expect(reopened.project.spatialModel?.objectTransforms?.[roomId].chair).toEqual(pose);
+  });
+});

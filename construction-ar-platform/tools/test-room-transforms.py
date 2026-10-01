@@ -8,9 +8,9 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'ios/ConstructionARPlatform/SavedRoom3DView.swift').read_text()
-methods = ['buildRoom', 'buildElement', 'capturedPolygonNode', 'triangulateBoundary', 'makeWallQuad',
+methods = ['buildRoom', 'buildObjectRoots', 'sceneIdentity', 'addMeasurementLabel', 'buildElement', 'capturedPolygonNode', 'triangulateBoundary', 'makeWallQuad',
            'simdMatrix', 'matrixTransform', 'apply', 'numericArray', 'finiteNumber',
-           'number', 'makeOpeningNode', 'material', 'furnitureColor', 'rotatedRoomMatrix', 'measurementText', 'editableRoom']
+           'applyObjectTransforms', 'finiteTransform', 'number', 'makeOpeningNode', 'material', 'furnitureColor', 'rotatedRoomMatrix', 'measurementText', 'editableRoom']
 parts = []
 for name in methods:
     marker = ('  static func ' if name in ['triangulateBoundary', 'rotatedRoomMatrix', 'measurementText'] else '  private func ') + name + '('
@@ -27,6 +27,10 @@ import SceneKit
 import AppKit
 import simd
 final class Renderer {
+  struct SceneIdentity { let roomId: String; let featureId: String? }
+  var annotationAnchors: [SCNNode] = []
+  var objectTransformsJSON = "{}"
+  func updateAnnotations() {}
   var roomNodes: [String: SCNNode] = [:]
   var roomTransforms: [String: [String: Any]] = [:]
   var roomCenters: [String: SIMD3<Float>] = [:]
@@ -34,7 +38,7 @@ final class Renderer {
   let debugRenderMode = "semantic"
   func buildMergedMesh(_ anchors: [[String: Any]], roomId: String, parent: SCNNode) {}
   func buildMesh(_ anchor: [String: Any], roomId: String, parent: SCNNode, anchorIndex: Int) {}
-  func addAnnotation(anchor: SCNNode, roomId: String, title: String, dimensions: String, summary: Bool) {}
+  func addAnnotation(anchor: SCNNode, roomId: String, title: String, dimensions: String, summary: Bool) { annotationAnchors.append(anchor) }
   var allowDirectManipulation = false
   var editingRoomId: String?
   var lockedRoomId: String?
@@ -43,7 +47,6 @@ final class Renderer {
   var measurementLabelCount = 0
   func logSemanticCorners(featureId: String, node: SCNNode, parent: SCNNode, width: Float, height: Float) {}
   func logComponent(kind: String, id: String, node: SCNNode, source: Any?, dimensions: [String: Any]?) {}
-  func addMeasurementLabel(_ m: [[String: Any]], to: SCNNode, kind: String, dimensions: SIMD3<Float>) {}
 '''
 tests = r'''
 let renderer = Renderer()
@@ -203,6 +206,64 @@ reopenedHierarchy.buildRoom(roomPayload("B", roomB.simdTransform))
 let reopenedObjects = reopenedHierarchy.roomNodes["B"]!.childNodes.filter { $0.name?.hasPrefix("feature|") == true }
 for (before, after) in zip(objectsB, reopenedObjects) { precondition(before.simdWorldTransform == after.simdWorldTransform) }
 print("PASS: production buildRoom parents every scanned/proposed instance; moving B preserves A and local matrices; reopen restores world poses")
+// Apply production object bridge updates to existing nodes in a rotated room.
+let target = objectsB[0], sibling = objectsB[1]
+let siblingPose = sibling.simdTransform, parentPose = roomB.simdTransform
+let movedObject = rigid(.pi / 3, SIMD3(2, 0.5, -1))
+hierarchy.objectTransformsJSON = String(data: try JSONSerialization.data(withJSONObject: ["B": ["chair-0": hierarchy.matrixTransform(movedObject)]]), encoding: .utf8)!
+hierarchy.applyObjectTransforms()
+precondition(target === objectsB[0] && target.simdTransform == movedObject)
+precondition(sibling.simdTransform == siblingPose && roomB.simdTransform == parentPose && roomA.simdTransform == originalA)
+precondition(target.simdWorldTransform == parentPose * movedObject)
+reopenedHierarchy.objectTransformsJSON = hierarchy.objectTransformsJSON
+reopenedHierarchy.applyObjectTransforms()
+precondition(reopenedObjects[0].simdWorldTransform == target.simdWorldTransform)
+print("PASS: production object override bridge moves only the selected child, preserves room/other objects, and restores placement on reopen")
+// Full production assembly parenting: related entities, their label anchors and
+// descendant hit targets must all resolve to one movable owner.
+for category in ["appliance", "storage", "table", "chair"] {
+  let grouped = Renderer()
+  let rootPose = rigid(0.4, SIMD3(2, 0.5, -1))
+  let offsets = [matrix_identity_float4x4, rigid(-0.2, SIMD3(0.2, 0.3, 0.1)), rigid(0.1, SIMD3(-0.1, 0.1, 0.3))]
+  let components: [[String: Any]] = offsets.enumerated().map { i, local in
+    ["id": "component-\(i)", "kind": "furniture", "category": category,
+     "dimensions": ["width": 0.5, "height": 1, "depth": 0.6],
+     "objectRootId": "component-0", "objectRootTransform": grouped.matrixTransform(rootPose),
+     "transform": grouped.matrixTransform(rootPose * local)]
+  }
+  let payload: [String: Any] = ["id": "assembly", "transform": grouped.matrixTransform(matrix_identity_float4x4), "roomScan": ["elements": components, "measurements": []]]
+  grouped.buildRoom(payload)
+  let room = grouped.roomNodes["assembly"]!
+  let owner = room.childNode(withName: "object|assembly|component-0", recursively: false)!
+  precondition(owner.childNodes.count == 3)
+  let nodes = owner.childNodes
+  let labels = grouped.annotationAnchors.filter { $0.parent !== room }
+  precondition(labels.count == 3)
+  let locals = nodes.map { $0.simdTransform }
+  let labelLocals = labels.map { $0.simdTransform }
+  for (index, node) in nodes.enumerated() {
+    for col in 0..<4 { precondition(simd_length(node.simdTransform[col] - offsets[index][col]) < 0.00001) }
+    precondition(grouped.sceneIdentity(for: node)?.featureId == "component-0")
+    precondition(grouped.sceneIdentity(for: labels[index])?.featureId == "component-0")
+  }
+  let edited = rigid(.pi / 2, SIMD3(5, 0.5, 3))
+  grouped.objectTransformsJSON = String(data: try JSONSerialization.data(withJSONObject: ["assembly": ["component-0": grouped.matrixTransform(edited)]]), encoding: .utf8)!
+  grouped.applyObjectTransforms()
+  precondition(owner.simdTransform == edited && room.simdTransform == matrix_identity_float4x4)
+  for (index, node) in nodes.enumerated() {
+    precondition(node.simdTransform == locals[index])
+    precondition(labels[index].simdTransform == labelLocals[index])
+    precondition(node.simdWorldTransform == edited * locals[index])
+    close(SIMD3(labels[index].simdWorldPosition), SIMD3((edited * locals[index] * labelLocals[index]).columns.3.x, (edited * locals[index] * labelLocals[index]).columns.3.y, (edited * locals[index] * labelLocals[index]).columns.3.z), "component label follows root")
+  }
+  // Rehydration reconstructs a single owner and each mesh once; no child edits.
+  let reloaded = Renderer(); reloaded.buildRoom(payload)
+  reloaded.objectTransformsJSON = grouped.objectTransformsJSON; reloaded.applyObjectTransforms()
+  let reloadedOwner = reloaded.roomNodes["assembly"]!.childNode(withName: "object|assembly|component-0", recursively: false)!
+  precondition(reloadedOwner.childNodes.count == 3)
+  for (a, b) in zip(owner.childNodes, reloadedOwner.childNodes) { precondition(a.simdWorldTransform == b.simdWorldTransform) }
+}
+print("PASS: appliance/storage/table/chair component roots preserve offsets, rotation, label anchors, descendant selection and save/reload without duplicate meshes")
 // Verify the JS fallback's Rz * Ry * Rx convention against SceneKit itself.
 let pitch: Float = 0.15, yaw: Float = 0.6, roll: Float = -0.2
 let rx = simd_float4x4(simd_quatf(angle: pitch, axis: SIMD3(1,0,0)))
