@@ -1,3 +1,4 @@
+import { CatalogBrowser } from "../catalog/CatalogBrowser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -592,7 +593,7 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDe
     <BlueprintPanel blueprints={project.blueprints} onImport={onImportBlueprint} />
     <RoomConnectionPanel project={project} onSave={onSaveRoomConnection} />
     <Text style={styles.sectionLabel}>Catalog</Text>
-    <View style={styles.catalogList}>{starterCatalog.map((item: any) => <Pressable key={item.id} onPress={() => onSelectCatalogObject(item.id)} style={[styles.catalogItem, item.id === selectedCatalogObjectId && styles.selectedCard]}><Text style={styles.moduleName}>{item.name}</Text><Text style={styles.moduleDescription}>{item.category} · {item.placementMode}</Text></Pressable>)}</View>
+    <CatalogBrowser selectedId={selectedCatalogObjectId} onSelect={onSelectCatalogObject} />
     {selectedCatalogObject && <Button label={`Open AR placement for ${selectedCatalogObject.name}`} onPress={() => onOpenMeasure(selectedCatalogObject.id)} />}
     {project.placedObjects.length > 0 && <><Text style={styles.sectionLabel}>Current layout</Text>{project.placedObjects.filter((item: any) => item.status === "active").map((item: any, index: number) => <Text key={`${item.id}-${index}`} style={styles.layoutItem}>{item.displayName}</Text>)}</>}
     <View style={styles.form}><Text style={styles.sectionLabel}>Field notes</Text><Field label="Add a note" value={fieldNoteText} onChangeText={onFieldNoteTextChange} /><Button label="Save note" onPress={onAddFieldNote} />{project.fieldNotes.length === 0 ? <Text style={styles.empty}>No field notes yet.</Text> : project.fieldNotes.slice(0, 5).map((note: any) => <View key={note.id} style={styles.note}><Text style={styles.moduleDescription}>{note.text}</Text><Text style={styles.noteDate}>{new Date(note.createdAt).toLocaleString()}</Text></View>)}</View>

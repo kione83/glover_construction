@@ -1,3 +1,4 @@
+import { CatalogBrowser } from "../catalog/CatalogBrowser";
 import { placementSurfaceForAR, savePlacementSurface, type PlacementSurfaceObservation } from "../../domain/surfaceAttachment";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as FileSystem from "expo-file-system/legacy";
@@ -1218,20 +1219,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
           }} />}
           {activeRoomPlacedObjects.some(object => !object.roomLocalTransform) && <Text style={styles.statusText}>Some legacy placements have no recoverable room mapping. Original coordinates are retained.</Text>}
           {furnitureIdentification ? <Text style={styles.identification}>Detected suggestion: {furnitureIdentification.label} ({Math.round(furnitureIdentification.confidence * 100)}%)</Text> : null}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-          >
-            {starterCatalog.map((item) => (
-              <SelectionChip
-                key={item.id}
-                label={item.name}
-                onPress={() => setSelectedCatalogObjectId(item.id)}
-                selected={item.id === selectedCatalogObject?.id}
-              />
-            ))}
-          </ScrollView>
+          <CatalogBrowser compact selectedId={selectedCatalogObject?.id} onSelect={setSelectedCatalogObjectId} />
 
           <Text style={styles.statusText}>Aim at a recognized {selectedCatalogObject?.allowedSurfaceKinds.join(" or ")} surface. Scan around it if mounting is unavailable.</Text>
           <Pressable
