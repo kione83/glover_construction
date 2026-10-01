@@ -200,9 +200,9 @@ async function persistProjectMediaReferences(project: Project): Promise<Project>
 }
 
 async function removeOrphanedScanArchives(documents: ProjectDocument[]): Promise<void> {
-  const directory = await ensureScanArchiveDirectory();
-  if (!directory) return;
   try {
+    const directory = await ensureScanArchiveDirectory();
+    if (!directory) return;
     const referenced = new Set(documents.flatMap((document) => document.project.roomCaptures.flatMap((room) => room.roomScan?.archiveUri ?? [])));
     const entries = await FileSystem.readDirectoryAsync(directory);
     await Promise.all(entries.filter((entry) => entry.endsWith(".json") && !referenced.has(`${directory}${entry}`)).map((entry) => FileSystem.deleteAsync(`${directory}${entry}`, { idempotent: true })));

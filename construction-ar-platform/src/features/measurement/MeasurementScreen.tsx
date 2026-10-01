@@ -44,11 +44,11 @@ import { canonicalTransform, composeTransforms } from "../../domain/spatialTrans
 import { normalizePlacedObject, placeObjectInRoom } from "../../domain/roomObjectHierarchy";
 import type { Transform3D } from "../../domain/spatial";
 import { RoomPlacementAlignment } from "./RoomPlacementAlignment";
+import { ProjectEditQueue, type ProjectEdit } from "../../storage/projectEditQueue";
 import type { ProjectDocument } from "../../storage/projectDocument";
 import {
   loadProjectDocuments,
   replaceProjectDocument,
-  saveProjectDocuments,
 } from "../../storage/projectRepository";
 import {
   NativeMeasurementARView,
@@ -359,11 +359,16 @@ function MeasurementSummaryCard({
 export function MeasurementScreen({ initialProjectId, onProjectChange, initialCatalogObjectId, onClose }: MeasurementScreenProps) {
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [loadRequest, setLoadRequest] = useState(0);
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initialProjectId);
   const [selectedRoomId, setSelectedRoomId] = useState<string>();
   const [arSessionId, setARSessionId] = useState<string>();
   const [roomAlignment, setRoomAlignment] = useState<{ roomId: string; sessionId: string; worldFromRoom: Transform3D }>();
-  const placementSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const editQueue = useRef<ProjectEditQueue | null>(null);
+  if (!editQueue.current) editQueue.current = new ProjectEditQueue(setProjectDocuments);
+  const [saveError, setSaveError] = useState<string>();
+  const [retryingSave, setRetryingSave] = useState(false);
   const [screenView, setScreenView] = useState<ScreenView>("measure");
   const [selectedLogEntryId, setSelectedLogEntryId] = useState<string>();
   const [measurementMode, setMeasurementMode] = useState<MeasurementMode>("single");
@@ -391,6 +396,8 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
     let isMounted = true;
 
     async function loadDocuments() {
+      setIsLoading(true);
+      setLoadError(false);
       try {
         const documents = await loadProjectDocuments();
 
@@ -403,7 +410,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
         setSelectedProjectId(projectId);
         onProjectChange(projectId);
       } catch {
-        if (isMounted) setStatus("Projects could not be loaded. Close AR tools and try again; saved data has not been changed.");
+        if (isMounted) setLoadError(true);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -414,7 +421,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [loadRequest]);
 
   useEffect(() => {
     if (initialCatalogObjectId) {
@@ -527,24 +534,41 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
 
   const nextCaptureRole: "start" | "end" = nativeSnapshot?.startPoint ? "end" : "start";
 
-  async function persistProjectDocuments(nextDocuments: ProjectDocument[]) {
-    setProjectDocuments(nextDocuments);
-    await saveProjectDocuments(nextDocuments);
+  async function queueProjectEdit(edit: ProjectEdit): Promise<boolean> {
+    try {
+      await editQueue.current!.enqueue(edit);
+      setSaveError(undefined);
+      return true;
+    } catch {
+      setSaveError("Changes have not been saved. They are retained on this screen; retry before closing.");
+      return false;
+    }
+  }
+
+  async function retryPendingChanges(closeAfterSave = false) {
+    setRetryingSave(true);
+    try {
+      await editQueue.current!.flush();
+      setSaveError(undefined);
+      if (closeAfterSave) onClose();
+    } catch {
+      setSaveError("Changes have not been saved. Keep this screen open and retry when storage is available.");
+      if (closeAfterSave) Alert.alert("Changes not saved", "Please retry saving before closing. Your pending edits are still on this screen.");
+    } finally {
+      setRetryingSave(false);
+    }
   }
 
   async function updateSelectedProjectDocument(
     updater: (document: ProjectDocument) => ProjectDocument,
-  ) {
+  ): Promise<boolean> {
     const projectId = selectedProjectDocument?.project.id;
-    if (!projectId) return;
-    const task = placementSaveQueue.current.catch(() => undefined).then(async () => {
-      const latest = await loadProjectDocuments();
+    if (!projectId) return false;
+    return queueProjectEdit(latest => {
       const current = latest.find(document => document.project.id === projectId);
       if (!current) throw new Error("Project no longer exists");
-      await persistProjectDocuments(replaceProjectDocument(latest, updater(current)));
+      return replaceProjectDocument(latest, updater(current));
     });
-    placementSaveQueue.current = task;
-    try { await task; } catch (error) { setStatus(`Save failed: ${String(error)}`); }
   }
 
   function clearLiveMeasurementState(message: string) {
@@ -703,7 +727,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
         project: {
           ...document.project,
           status: "scanned",
-          roomCaptures: [...document.project.roomCaptures, defaultRoom],
+          roomCaptures: [...document.project.roomCaptures.filter(room => room.id !== defaultRoom.id), defaultRoom],
         },
       }));
     } else if (selectedRoomId) {
@@ -807,14 +831,14 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
         }),
     });
 
-    await updateSelectedProjectDocument((document) => ({
+    const saved = await updateSelectedProjectDocument((document) => ({
       ...document,
-      measurementLogEntries: [entry, ...document.measurementLogEntries],
+      measurementLogEntries: [entry, ...document.measurementLogEntries.filter(existing => existing.id !== entry.id)],
     }));
 
     setSelectedLogEntryId(entry.id);
     setScreenView("detail");
-    clearMultiCaptureSession("Multi-Capture saved. Review the result in the measurement log.");
+    clearMultiCaptureSession(saved ? "Multi-Capture saved. Review the result in the measurement log." : "Multi-Capture is waiting to save. Retry saving changes before closing.");
   }
 
   function persistSingleMeasurement(measurement: Measurement) {
@@ -831,7 +855,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
 
     void updateSelectedProjectDocument((document) => ({
       ...document,
-      measurementLogEntries: [entry, ...document.measurementLogEntries],
+      measurementLogEntries: [entry, ...document.measurementLogEntries.filter(existing => existing.id !== entry.id)],
     }));
   }
 
@@ -968,12 +992,10 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
           text: "Clear All",
           style: "destructive",
           onPress: () => {
-            const nextDocuments = projectDocuments.map((document) => ({
+            void queueProjectEdit(latest => latest.map(document => ({
               ...document,
               measurementLogEntries: clearAllMeasurementLogEntries(),
-            }));
-
-            void persistProjectDocuments(nextDocuments);
+            })));
             setScreenView("log");
             setSelectedLogEntryId(undefined);
           },
@@ -1640,6 +1662,12 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
     );
   };
 
+  if (loadError) return <SafeAreaView style={styles.screen}><View style={styles.loadingContainer}>
+    <Text style={styles.cardCopy}>Projects could not be loaded. Saved data has not been changed.</Text>
+    <Pressable accessibilityRole="button" onPress={() => setLoadRequest(value => value + 1)} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Retry loading projects</Text></Pressable>
+    <Pressable accessibilityRole="button" onPress={onClose} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Back to project</Text></Pressable>
+  </View></SafeAreaView>;
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -1722,7 +1750,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
               <Pressable
                 onPress={() => {
                   setIsOverflowMenuOpen(false);
-                  void placementSaveQueue.current.then(onClose).catch(() => setStatus("Save failed. Retry before closing."));
+                  void retryPendingChanges(true);
                 }}
                 style={styles.menuItem}
               >
@@ -1732,6 +1760,13 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
           ) : null}
         </View>
       </View>
+
+      {saveError && <View style={styles.logRoomCard} accessibilityRole="alert">
+        <Text style={styles.cardCopy}>{saveError}</Text>
+        <Pressable accessibilityRole="button" disabled={retryingSave} onPress={() => { void retryPendingChanges(); }} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>{retryingSave ? "Retrying save…" : "Retry saving changes"}</Text>
+        </Pressable>
+      </View>}
 
       {screenView === "measure"
         ? renderMeasureView()

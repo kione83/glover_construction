@@ -129,3 +129,45 @@ describe("offline plan references", () => {
     expect(mocks.alert).toHaveBeenCalledWith("Plan could not be opened", "Import this file again.");
   });
 });
+
+describe("AR edit recovery", () => {
+  const placement = (id: string, x: number) => ({ nativeEvent: { arSessionId: "session", placement: { kind: "object-placed", message: "Placed", object: { id, catalogObjectId: "furniture-sofa", displayName: id, placementMode: "floor-mounted", dimensions: { width: 2, height: 1, depth: 0.9 }, position: { x, y: 0, z: 0 }, rotationY: 0 } } } });
+  it("retries a failed placement before subsequent edits and saves to the selected project", async () => {
+    await act(async () => { renderer = create(<MeasurementScreen initialProjectId="B" onProjectChange={() => {}} onClose={() => {}} />); });
+    mocks.save.mockRejectedValueOnce(new Error("Disk full"));
+    await act(async () => renderer.root.findByType("NativeMeasurementARView" as any).props.onMeasurementUpdate(placement("first", 1)));
+    expect(documents[1].project.placedObjects).toHaveLength(0);
+    expect(button("Retry saving changes")).toBeDefined();
+    // A later native event must not discard the earlier failed edit.
+    await act(async () => renderer.root.findByType("NativeMeasurementARView" as any).props.onMeasurementUpdate(placement("second", 2)));
+    expect(documents[1].project.placedObjects.map(object => object.id)).toEqual(["first", "second"]);
+    expect(documents[0].project.placedObjects).toHaveLength(0);
+    expect(button("Retry saving changes")).toBeUndefined();
+  });
+
+  it("keeps the workspace open on persistent failure and closes only after pending edits save", async () => {
+    const close = vi.fn();
+    await act(async () => { renderer = create(<MeasurementScreen initialProjectId="B" onProjectChange={() => {}} onClose={close} />); });
+    mocks.save.mockRejectedValueOnce(new Error("Disk full")).mockRejectedValueOnce(new Error("Still full"));
+    await act(async () => renderer.root.findByType("NativeMeasurementARView" as any).props.onMeasurementUpdate(placement("retained", 1)));
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Open measurement menu" }).props.onPress());
+    await press("Close Workspace");
+    expect(close).not.toHaveBeenCalled();
+    expect(mocks.alert).toHaveBeenCalledWith("Changes not saved", expect.any(String));
+    await press("Retry saving changes");
+    expect(documents[1].project.placedObjects.map(object => object.id)).toEqual(["retained"]);
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Open measurement menu" }).props.onPress());
+    await press("Close Workspace");
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AR workspace loading", () => {
+  it("offers retry after storage failure and starts AR only once projects load", async () => {
+    mocks.load.mockRejectedValueOnce(new Error("Storage unavailable"));
+    await act(async () => { renderer = create(<MeasurementScreen initialProjectId="B" onProjectChange={() => {}} onClose={() => {}} />); });
+    expect(renderer.root.findAllByType("NativeMeasurementARView" as any)).toHaveLength(0);
+    await press("Retry loading projects");
+    expect(renderer.root.findAllByType("NativeMeasurementARView" as any)).toHaveLength(1);
+  });
+});

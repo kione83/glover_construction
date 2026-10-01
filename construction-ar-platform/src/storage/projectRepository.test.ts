@@ -214,3 +214,14 @@ describe("saved viewer object overrides", () => {
     expect(reopened.project.spatialModel?.objectTransforms?.[roomId].chair).toEqual(pose);
   });
 });
+
+describe("post-save cleanup", () => {
+  it("does not report a committed project write as failed when archive cleanup cannot open its directory", async () => {
+    vi.clearAllMocks();
+    const document = createEmptyProjectDocument({ id: "cleanup", name: "Committed project" });
+    mocks.asyncStorage.setItem.mockResolvedValueOnce(undefined);
+    mocks.getInfoAsync.mockRejectedValueOnce(new Error("Cleanup directory unavailable"));
+    await expect(saveProjectDocuments([document])).resolves.toBeUndefined();
+    expect(mocks.asyncStorage.setItem).toHaveBeenCalledOnce();
+  });
+});

@@ -60,3 +60,14 @@ describe("visual layout sharing", () => {
     expect(button("Share layout image").props.disabled).toBe(false);
   });
 });
+
+describe("saved model loading", () => {
+  it("reports a missing project instead of loading indefinitely and can recover on retry", async () => {
+    mocks.load.mockResolvedValueOnce([]);
+    await open();
+    expect(renderer.root.findAllByType("NativeSavedRoom3DView" as any)).toHaveLength(0);
+    expect(button("Retry loading model")).toBeDefined();
+    await act(async () => button("Retry loading model").props.onPress());
+    expect(renderer.root.findAllByType("NativeSavedRoom3DView" as any)).toHaveLength(1);
+  });
+});

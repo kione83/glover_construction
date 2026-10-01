@@ -76,6 +76,7 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Loading scans…");
   const [loadError, setLoadError] = useState<string>();
+  const [loadRequest, setLoadRequest] = useState(0);
   const [step, setStep] = useState(0.1);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveRevision = useRef(0);
@@ -84,11 +85,14 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
 
   useEffect(() => {
     let cancelled = false;
+    setLoadError(undefined);
+    setLoaded(false);
     void (async () => {
       // Load the index first, then only the archives required by this viewer.
       const metadataDocuments = await loadProjectDocuments({ includeScans: false });
       const metadataProject = metadataDocuments.find((document) => document.project.id === projectId)?.project;
-      if (!metadataProject || cancelled) return;
+      if (cancelled) return;
+      if (!metadataProject) throw new Error("The project could not be found. Return to the dashboard or retry loading.");
       const transforms = initialAssemblyTransforms(metadataProject);
       const scanRooms = metadataProject.roomCaptures.filter((room) => room.roomScan);
       const defaultRoomA = scanRooms.find((room) => room.id !== roomId)?.id ?? scanRooms[0]?.id ?? metadataProject.roomCaptures[0]?.id ?? "";
@@ -108,6 +112,7 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
 
       const fullDocuments = await loadProjectDocuments({ includeScans: true, projectId, roomIds: roomsToLoad });
       const fullProject = fullDocuments.find((document) => document.project.id === projectId)?.project;
+      if (!cancelled && !fullProject) throw new Error("The saved project could not be loaded. Please retry.");
       if (!cancelled && fullProject) {
         setProject(fullProject);
         if (mode !== "room") setDraftTransforms(initialAssemblyTransforms(fullProject));
@@ -115,7 +120,7 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
       }
     })().catch(error => { if (!cancelled) setLoadError(String(error)); });
     return () => { cancelled = true; };
-  }, [projectId, roomId, mode]);
+  }, [projectId, roomId, mode, loadRequest]);
 
   const roomA = project?.roomCaptures.find((room) => room.id === roomAId);
   const roomB = project?.roomCaptures.find((room) => room.id === roomBId);
@@ -298,7 +303,7 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   const selectedRoom = project?.roomCaptures.find((room) => room.id === selectedRoomId);
   const selectedPlacements = project?.placedObjects.filter(object => object.status === "active" && object.roomCaptureId === selectedRoomId) ?? [];
   const selectedRoomName = selectedRoom ? selectedRoom.name || `Room ${(project?.roomCaptures.filter(r => r.roomScan).indexOf(selectedRoom) ?? 0) + 1}` : "Select a room";
-  if (!project || !loaded) return <SafeAreaView style={styles.center}><Text style={styles.text}>{loadError ?? "Loading saved model…"}</Text><Button label="Close" onPress={onClose} /></SafeAreaView>;
+  if (!project || !loaded) return <SafeAreaView style={styles.center}><Text style={styles.text}>{loadError ?? "Loading saved model…"}</Text>{loadError && <Button label="Retry loading model" onPress={() => setLoadRequest(value => value + 1)} />}<Button label="Close" onPress={onClose} /></SafeAreaView>;
 
   return <SafeAreaView style={styles.screen}>
     <View style={styles.header}><View><Text style={styles.eyebrow}>{mode === "project" ? "ROOM ASSEMBLY" : "SAVED ROOM"}</Text><Text style={styles.title}>{title}</Text></View><Pressable onPress={() => void closeViewer()} style={styles.close}><Text style={styles.closeText}>Close</Text></Pressable></View>
