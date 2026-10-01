@@ -1,3 +1,5 @@
+import { RoomPlacementAlignment } from "../features/measurement/RoomPlacementAlignment";
+import { canonicalTransform } from "../domain/spatialTransforms";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, create, type ReactTestRenderer, type ReactTestInstance } from "react-test-renderer";
 const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), alert: vi.fn(), preview: vi.fn(), duplicate: vi.fn() }));
@@ -209,5 +211,28 @@ describe("design alternative workflow", () => {
     expect(renderer.root.findAllByType("Pressable" as any)).toHaveLength(0);
     await act(async () => finish({ documents, projectId: "B" }));
     expect(mocks.duplicate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("observed mounting surface workflow", () => {
+  it("saves compatible support evidence with placement, retries failures, and sends it back to AR", async () => {
+    await act(async () => { renderer = create(<MeasurementScreen initialProjectId="B" onProjectChange={() => {}} onClose={() => {}} />); });
+    const update = async (nativeEvent: any) => act(async () => renderer.root.findByType("NativeMeasurementARView" as any).props.onMeasurementUpdate({ nativeEvent }));
+    await update({ arSessionId: "surface-session", tracking: { quality: "normal" } });
+    await act(async () => renderer.root.findByType(RoomPlacementAlignment).props.onAligned(canonicalTransform()));
+    const surface = { id: "wall-plane", kind: "wall", transformMatrix: canonicalTransform({ position: { x: 0, y: 1, z: 0 } }).matrix!, observedAt: "2026-10-01T22:00:00Z" };
+    const object = { id: "mounted-outlet", catalogObjectId: "electrical-outlet-duplex", displayName: "Outlet", placementMode: "wall-mounted", dimensions: { width: 0.08, height: 0.12, depth: 0.04 }, position: { x: 0, y: 1, z: 0.02 }, rotationY: 0, surfaceRotation: 0.3, surface };
+    mocks.save.mockRejectedValueOnce(new Error("Disk full"));
+    await update({ arSessionId: "surface-session", placement: { kind: "object-placed", message: "Mounted", object } });
+    await press("Retry saving changes");
+    const saved = documents[1].project;
+    expect(saved.anchors[0].observation?.nativePlaneId).toBe("wall-plane");
+    expect(saved.placedObjects[0].surfaceRotation).toBe(0.3);
+    expect(saved.validationIssues.some(issue => issue.ruleId === "attach-to-supported-surface")).toBe(false);
+    const restored = renderer.root.findByType("NativeMeasurementARView" as any).props.placedObjects[0];
+    expect(restored.surface).toEqual(surface);
+    expect(restored.allowedSurfaceKinds).toEqual(["wall"]);
+    expect(restored.surfaceRotation).toBe(0.3);
+    expect(documents[0].project.anchors).toHaveLength(0);
   });
 });

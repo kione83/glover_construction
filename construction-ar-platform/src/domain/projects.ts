@@ -264,6 +264,7 @@ export interface CatalogObject {
 }
 
 export interface PlacementAnchor {
+  observation?: { source: "ar-plane"; nativePlaneId: string; observedAt: string };
   id: string;
   roomCaptureId: string;
   reference: SurfaceReference;
@@ -271,6 +272,8 @@ export interface PlacementAnchor {
 }
 
 export interface PlacedObject {
+  /** Rotation about the mounting surface normal, radians. */
+  surfaceRotation?: number;
   id: string;
   catalogObjectId: string;
   roomCaptureId: string;

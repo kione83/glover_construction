@@ -1,3 +1,4 @@
+import { placementSurfaceForAR, savePlacementSurface, type PlacementSurfaceObservation } from "../../domain/surfaceAttachment";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import {
@@ -146,14 +147,17 @@ function mapResolvedEndpoint(
   };
 }
 
-function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject, worldPose: Transform3D): NativePlacedObjectSnapshot {
+function mapPlacedObjectToNativeSnapshot(placedObject: PlacedObject, worldPose: Transform3D, surface?: PlacementSurfaceObservation): NativePlacedObjectSnapshot {
   const catalogObject = starterCatalog.find((item) => item.id === placedObject.catalogObjectId);
 
   return {
     id: placedObject.id,
     catalogObjectId: placedObject.catalogObjectId,
     displayName: placedObject.displayName,
-    placementMode: catalogObject?.placementMode ?? "floor-standing",
+    placementMode: catalogObject?.placementMode ?? "free-place",
+    allowedSurfaceKinds: catalogObject?.allowedSurfaceKinds ?? [],
+    surface,
+    surfaceRotation: placedObject.surfaceRotation,
     dimensions: {
       width: placedObject.dimensions.width,
       height: placedObject.dimensions.height,
@@ -176,6 +180,7 @@ function mapNativeSnapshotToPlacedObject(
   return {
     ...existingObject,
     id: snapshot.id,
+    surfaceRotation: snapshot.surfaceRotation,
     catalogObjectId: snapshot.catalogObjectId,
     roomCaptureId,
     anchorId: existingObject?.anchorId ?? `${snapshot.id}-anchor`,
@@ -208,6 +213,7 @@ function createPlacementRequest(
     catalogObjectId: catalogObject.id,
     displayName: catalogObject.name,
     placementMode: catalogObject.placementMode,
+    allowedSurfaceKinds: catalogObject.allowedSurfaceKinds,
     dimensions: {
       width: catalogObject.defaultDimensions.width,
       height: catalogObject.defaultDimensions.height,
@@ -475,11 +481,11 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
 
   const activeAlignment = roomAlignment && roomAlignment.roomId === selectedRoomId && roomAlignment.sessionId === arSessionId ? roomAlignment.worldFromRoom : undefined;
   const nativePlacedObjects = useMemo(() => activeRoomPlacedObjects.flatMap(object => {
-    if (activeAlignment && object.roomLocalTransform) return [mapPlacedObjectToNativeSnapshot(object, composeTransforms(activeAlignment, object.roomLocalTransform))];
+    if (activeAlignment && object.roomLocalTransform) return [mapPlacedObjectToNativeSnapshot(object, composeTransforms(activeAlignment, object.roomLocalTransform), placementSurfaceForAR(selectedProject!, object, activeAlignment))];
     // Never replay coordinates from another AR session as if they were localized.
     if (arSessionId && object.arSessionId === arSessionId) return [mapPlacedObjectToNativeSnapshot(object, canonicalTransform(object.transform))];
     return [];
-  }), [activeRoomPlacedObjects, activeAlignment, arSessionId]);
+  }), [activeRoomPlacedObjects, activeAlignment, arSessionId, selectedProject]);
 
   const activeRoomMeasurementLogEntries = useMemo(() => {
     if (!selectedProjectDocument || !selectedRoomId) {
@@ -596,16 +602,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
       const mapped = mapNativeSnapshotToPlacedObject(snapshot, placementRoomId, existingObject);
       const mapping = roomAlignment?.roomId === placementRoomId && roomAlignment.sessionId === sessionId ? roomAlignment.worldFromRoom : undefined;
       const placedObject = normalizePlacedObject(placeObjectInRoom(mapped, mapped.transform, sessionId ?? "unknown-session", mapping), document.project);
-      const nextPlacedObjects = existingObject
-        ? document.project.placedObjects.map((object) =>
-            object.id === placedObject.id ? placedObject : object,
-          )
-        : [...document.project.placedObjects, placedObject];
-      const nextProject: Project = {
-        ...document.project,
-        status: "layout-in-progress",
-        placedObjects: nextPlacedObjects,
-      };
+      const nextProject = savePlacementSurface({ ...document.project, status: "layout-in-progress" }, placedObject, snapshot.surface, mapping);
       const updatedProject = updateProjectSummary({
         ...nextProject,
         validationIssues: validateProject(nextProject, placedObject.updatedAt),
@@ -1236,6 +1233,7 @@ export function MeasurementScreen({ initialProjectId, onProjectChange, initialCa
             ))}
           </ScrollView>
 
+          <Text style={styles.statusText}>Aim at a recognized {selectedCatalogObject?.allowedSurfaceKinds.join(" or ")} surface. Scan around it if mounting is unavailable.</Text>
           <Pressable
             disabled={!selectedCatalogObject || !selectedRoomId}
             onPress={requestCatalogPlacement}

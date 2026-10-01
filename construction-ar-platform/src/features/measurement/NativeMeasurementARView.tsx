@@ -1,3 +1,4 @@
+import type { PlacementSurfaceObservation } from "../../domain/surfaceAttachment";
 import type { NativeSyntheticEvent, StyleProp, ViewStyle } from "react-native";
 
 import { Platform, UIManager, View, requireNativeComponent } from "react-native";
@@ -99,6 +100,7 @@ export interface NativePlacementDimensions {
 }
 
 export interface NativePlacementRequest {
+  allowedSurfaceKinds: string[];
   requestId: number;
   catalogObjectId: string;
   displayName: string;
@@ -108,6 +110,9 @@ export interface NativePlacementRequest {
 }
 
 export interface NativePlacedObjectSnapshot {
+  allowedSurfaceKinds?: string[];
+  surface?: PlacementSurfaceObservation;
+  surfaceRotation?: number;
   id: string;
   catalogObjectId: string;
   displayName: string;

@@ -931,16 +931,108 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     return node
   }
 
+  // Surface frames use +Z as the outward normal. Product axes stay consistent
+  // with centered SceneKit geometry and the domain's metric fit envelopes.
+  static func mountingTransform(point: SIMD3<Float>, normal: SIMD3<Float>, mode: String, dimensions: SIMD3<Float>, heading: Float) -> simd_float4x4? {
+    guard [point.x, point.y, point.z, normal.x, normal.y, normal.z, dimensions.x, dimensions.y, dimensions.z, heading].allSatisfy({ $0.isFinite }),
+          min(dimensions.x, min(dimensions.y, dimensions.z)) > 0,
+          simd_length(normal) > 0.001 else { return nil }
+    let n = simd_normalize(normal)
+    var x: SIMD3<Float>
+    var y: SIMD3<Float>
+    var z: SIMD3<Float>
+    let offset: Float
+    if mode == "wall-mounted" {
+      z = n
+      let right = simd_cross(SIMD3<Float>(0, 1, 0), z)
+      guard simd_length(right) > 0.001 else { return nil }
+      x = simd_normalize(right)
+      y = simd_normalize(simd_cross(z, x))
+      offset = dimensions.z / 2
+    } else if mode == "floor-mounted" || mode == "ceiling-mounted" {
+      y = mode == "floor-mounted" ? n : -n
+      let reference = abs(y.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 0, 1)
+      x = simd_normalize(reference - y * simd_dot(reference, y))
+      z = simd_normalize(simd_cross(x, y))
+      offset = dimensions.y / 2
+    } else { return nil }
+    let rotation = simd_quatf(angle: heading, axis: n)
+    x = rotation.act(x); y = rotation.act(y); z = rotation.act(z)
+    let center = point + n * offset
+    return simd_float4x4(columns: (SIMD4(x.x, x.y, x.z, 0), SIMD4(y.x, y.y, y.z, 0), SIMD4(z.x, z.y, z.z, 0), SIMD4(center.x, center.y, center.z, 1)))
+  }
+
+  private func resolvePlacementSnapshot(_ input: [String: Any]) -> [String: Any]? {
+    var snapshot = input
+    guard currentTracking.quality == "normal" else {
+      emitPlacement(kind: "placement-failed", message: "Tracking is limited. Move slowly around the surface and retry placement.")
+      return nil
+    }
+    let mode = snapshot["placementMode"] as? String ?? ""
+    if mode == "free-place" {
+      guard let target = latestReticleTarget, target.reticleState != "red",
+            let frame = sceneView.session.currentFrame, frame.timestamp - target.frameTimestamp < 1 else {
+        emitPlacement(kind: "placement-failed", message: "Aim at a stable tracked target before placing this object.")
+        return nil
+      }
+      var transform = simd_float4x4(simd_quatf(angle: numberValue(snapshot["rotationY"])?.floatValue ?? 0, axis: SIMD3(0, 1, 0)))
+      transform.columns.3 = SIMD4(target.point.x, target.point.y, target.point.z, 1)
+      snapshot["position"] = pointDictionary(target.point)
+      snapshot["transformMatrix"] = placementMatrixValues(transform)
+      snapshot.removeValue(forKey: "surface")
+      return snapshot
+    }
+    let allowed = snapshot["allowedSurfaceKinds"] as? [String] ?? []
+    let instruction = "Aim at a recognized \(allowed.isEmpty ? "mounting" : allowed.joined(separator: " or ")) surface. Scan around it until AR identifies it, then retry."
+    let center = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+    guard let query = sceneView.raycastQuery(from: center, allowing: .existingPlaneGeometry, alignment: .any),
+          let result = sceneView.session.raycast(query).first,
+          let plane = result.anchor as? ARPlaneAnchor else {
+      emitPlacement(kind: "placement-failed", message: instruction)
+      return nil
+    }
+    let kind: String
+    switch plane.classification {
+    case .wall: kind = "wall"
+    case .floor: kind = "floor"
+    case .ceiling: kind = "ceiling"
+    default:
+      emitPlacement(kind: "placement-failed", message: instruction)
+      return nil
+    }
+    guard allowed.contains(kind) else {
+      emitPlacement(kind: "placement-failed", message: "This object cannot mount on the detected \(kind). \(instruction)")
+      return nil
+    }
+    let point = SIMD3(result.worldTransform.columns.3.x, result.worldTransform.columns.3.y, result.worldTransform.columns.3.z)
+    var normal = simd_normalize(SIMD3(plane.transform.columns.1.x, plane.transform.columns.1.y, plane.transform.columns.1.z))
+    if kind == "floor" && normal.y < 0 { normal = -normal }
+    if kind == "ceiling" && normal.y > 0 { normal = -normal }
+    if kind == "wall", let camera = sceneView.session.currentFrame?.camera.transform.columns.3 {
+      if simd_dot(normal, SIMD3(camera.x, camera.y, camera.z) - point) < 0 { normal = -normal }
+    }
+    guard let dimensions = snapshot["dimensions"] as? [String: Any],
+          let transform = Self.mountingTransform(point: point, normal: normal, mode: mode,
+            dimensions: SIMD3(numberValue(dimensions["width"])?.floatValue ?? 0, numberValue(dimensions["height"])?.floatValue ?? 0, numberValue(dimensions["depth"])?.floatValue ?? 0),
+            heading: numberValue(snapshot["surfaceRotation"])?.floatValue ?? 0) else {
+      emitPlacement(kind: "placement-failed", message: "This object's size or mounting orientation is unavailable. Choose another catalog object.")
+      return nil
+    }
+    let reference = abs(normal.y) < 0.9 ? SIMD3<Float>(0, 1, 0) : SIMD3<Float>(0, 0, 1)
+    let right = simd_normalize(simd_cross(reference, normal))
+    let up = simd_cross(normal, right)
+    let surfaceFrame = simd_float4x4(columns: (SIMD4(right.x, right.y, right.z, 0), SIMD4(up.x, up.y, up.z, 0), SIMD4(normal.x, normal.y, normal.z, 0), SIMD4(point.x, point.y, point.z, 1)))
+    snapshot["surface"] = ["id": plane.identifier.uuidString, "kind": kind, "transformMatrix": placementMatrixValues(surfaceFrame), "observedAt": ISO8601DateFormatter().string(from: Date())]
+    snapshot["position"] = ["x": transform.columns.3.x, "y": transform.columns.3.y, "z": transform.columns.3.z]
+    snapshot["transformMatrix"] = placementMatrixValues(transform)
+    return snapshot
+  }
+
   private func handlePlacementRequest(_ request: NSDictionary?) {
     guard let request else { return }
     guard let requestId = numberValue(request["requestId"])?.intValue else { return }
     guard requestId != lastPlacementRequestId else { return }
     lastPlacementRequestId = requestId
-
-    guard let target = latestReticleTarget else {
-      emitPlacement(kind: "placement-failed", message: "Aim at a tracked surface before placing an object.")
-      return
-    }
 
     guard let catalogObjectId = request["catalogObjectId"] as? String,
           let displayName = request["displayName"] as? String,
@@ -951,17 +1043,21 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     }
 
     let id = "placement-\(requestId)-\(Int(Date().timeIntervalSince1970 * 1000))"
-    let snapshot = placementSnapshot(
+    var snapshot = placementSnapshot(
       id: id,
       catalogObjectId: catalogObjectId,
       displayName: displayName,
       placementMode: placementMode,
       dimensions: dimensions,
-      point: target.point,
+      point: SIMD3<Float>.zero,
       rotationY: 0,
       representation: request["representation"] as? String
     )
 
+    snapshot["allowedSurfaceKinds"] = request["allowedSurfaceKinds"] as? [String] ?? []
+    guard let mounted = resolvePlacementSnapshot(snapshot) else { return }
+    snapshot = mounted
+    placementSnapshotsById[id] = snapshot
     upsertPlacementNode(snapshot)
     selectedPlacedObjectId = id as NSString
     updatePlacementSelection()
@@ -987,15 +1083,8 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     }
 
     if action == "move-to-reticle" {
-      guard let target = latestReticleTarget else {
-        emitPlacement(kind: "placement-failed", message: "Aim at a tracked surface before moving the selected object.")
-        return
-      }
-      snapshot["position"] = ["x": target.point.x, "y": target.point.y, "z": target.point.z]
-      if var matrix = placementNodesById[objectId]?.simdTransform {
-        matrix.columns.3 = SIMD4(target.point.x, target.point.y, target.point.z, 1)
-        snapshot["transformMatrix"] = placementMatrixValues(matrix)
-      }
+      guard let mounted = resolvePlacementSnapshot(snapshot) else { return }
+      snapshot = mounted
       placementSnapshotsById[objectId] = snapshot
       upsertPlacementNode(snapshot)
       emitPlacement(kind: "object-updated", message: "Object moved to the reticle.", object: snapshot)
@@ -1005,8 +1094,15 @@ final class MeasurementARView: UIView, ARSCNViewDelegate, ARSessionDelegate {
     let currentRotation = numberValue(snapshot["rotationY"])?.floatValue ?? 0
     let delta: Float = action == "rotate-left" ? -.pi / 12 : .pi / 12
     snapshot["rotationY"] = currentRotation + delta
+    snapshot["surfaceRotation"] = (numberValue(snapshot["surfaceRotation"])?.floatValue ?? 0) + delta
     if let matrix = placementNodesById[objectId]?.simdTransform {
-      var rotated = simd_float4x4(simd_quatf(angle: delta, axis: SIMD3(0, 1, 0))) * matrix
+      var axis = SIMD3<Float>(0, 1, 0)
+      if let surface = snapshot["surface"] as? [String: Any],
+         let values = surface["transformMatrix"] as? [NSNumber], values.count == 16 {
+        let normal = SIMD3(values[2].floatValue, values[6].floatValue, values[10].floatValue)
+        if simd_length(normal) > 0.001 { axis = simd_normalize(normal) }
+      }
+      var rotated = simd_float4x4(simd_quatf(angle: delta, axis: axis)) * matrix
       rotated.columns.3 = matrix.columns.3
       snapshot["transformMatrix"] = placementMatrixValues(rotated)
     }
