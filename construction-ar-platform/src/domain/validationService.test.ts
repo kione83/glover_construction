@@ -41,3 +41,40 @@ describe("validateProject", () => {
     expect(new Set(issues.map((item) => item.id)).size).toBe(issues.length);
   });
 });
+
+describe("canonical placement validation", () => {
+  const placed = (id: string, worldX: number, localX?: number, yaw = 0): Project["placedObjects"][number] => ({
+    id, catalogObjectId: "furniture-sofa", roomCaptureId: "room-1", anchorId: `anchor-${id}`, displayName: id,
+    transform: { ...transform, position: { x: worldX, y: 0, z: 0 } }, transformSpace: "ar-world", arSessionId: `session-${id}`,
+    roomLocalTransform: localX === undefined ? undefined : { ...transform, position: { x: localX, y: 0, z: 0 }, rotation: { pitch: 0, yaw, roll: 0 } },
+    dimensions: { width: 2, height: 1, depth: 0.2, unit: "m" }, status: "active", placedAt: "2026-10-01", updatedAt: "2026-10-01",
+  });
+  const collisions = (project: Project) => validateProject(project).filter(issue => issue.ruleId === "object-collision-check");
+  it("detects overlapping room-local placements saved in different AR sessions", () => {
+    const project = projectWith([placed("one", 0, 0), placed("two", 100, 0)], []);
+    expect(collisions(project)).toHaveLength(1);
+  });
+  it("does not compare unrelated AR poses or report an unaligned object as checked", () => {
+    const project = projectWith([placed("one", 0, 0), placed("two", 0)], []);
+    expect(collisions(project)).toHaveLength(0);
+    expect(validateProject(project)).toContainEqual(expect.objectContaining({ ruleId: "placement-frame-check", objectId: "two", severity: "warning" }));
+  });
+  it("does not report collisions between identical local coordinates in different rooms", () => {
+    const project = projectWith([placed("one", 0, 0), { ...placed("two", 0, 0), roomCaptureId: "room-2" }], []);
+    project.roomCaptures.push({ ...project.roomCaptures[0], id: "room-2" });
+    expect(collisions(project)).toHaveLength(0);
+  });
+  it("uses room-local coordinates for clearance checks too", () => {
+    const panel = { ...placed("panel", 0, 0), catalogObjectId: "electrical-panel-small" };
+    const other = placed("other", 100, 0.2);
+    expect(validateProject(projectWith([panel, other], []))).toContainEqual(expect.objectContaining({ ruleId: "minimum-clearance-check", objectId: "panel" }));
+  });
+  it("marks missing surface evidence unverified instead of claiming a wrong surface", () => {
+    const project = projectWith([placed("one", 0, 0)], []);
+    expect(validateProject(project).find(issue => issue.ruleId === "attach-to-supported-surface")).toMatchObject({ severity: "warning", message: expect.stringContaining("unverified") });
+  });
+  it("does not require a mounting surface for a free-place catalog item", () => {
+    const project = projectWith([{ ...placed("pipe", 0, 0), catalogObjectId: "pipe-section-basic" }], []);
+    expect(validateProject(project).filter(issue => issue.ruleId === "attach-to-supported-surface")).toHaveLength(0);
+  });
+});
