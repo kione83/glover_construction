@@ -17,8 +17,16 @@ export class ProjectEditQueue {
 
   flush(): Promise<void> {
     if (this.running) return this.running;
+    if (!this.pending.length) return Promise.resolve();
     const task = this.drain();
-    this.running = task.finally(() => { this.running = undefined; });
+    this.running = task.then(() => {
+      this.running = undefined;
+      // A UI callback may enqueue after drain's final check but before this microtask.
+      if (this.pending.length) return this.flush();
+    }, error => {
+      this.running = undefined;
+      throw error;
+    });
     return this.running;
   }
 

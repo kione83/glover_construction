@@ -56,3 +56,30 @@ describe("retryable project edits", () => {
     expect(queue.pendingCount).toBe(0);
   });
 });
+
+describe("empty queue boundary", () => {
+  it("does not strand an edit enqueued immediately after an empty flush", async () => {
+    const queue = new ProjectEditQueue(() => {});
+    const empty = queue.flush();
+    const edit = queue.enqueue(note("B", "same-tick"));
+    await Promise.all([empty, edit]);
+    expect(documents[1].project.fieldNotes.map(note => note.id)).toEqual(["same-tick"]);
+    expect(queue.pendingCount).toBe(0);
+  });
+});
+
+describe("save completion boundary", () => {
+  it("drains an edit queued by a UI microtask immediately after the preceding write completes", async () => {
+    let queued = false;
+    let second: Promise<void> | undefined;
+    const queue = new ProjectEditQueue(() => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => { second = queue.enqueue(note("B", "after-write")); });
+    });
+    await queue.enqueue(note("B", "first"));
+    await second;
+    expect(documents[1].project.fieldNotes.map(note => note.id)).toEqual(["first", "after-write"]);
+    expect(queue.pendingCount).toBe(0);
+  });
+});
