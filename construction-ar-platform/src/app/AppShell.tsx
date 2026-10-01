@@ -18,6 +18,7 @@ import { colors } from "../theme/colors";
 
 export function AppShell() {
   const [activeScreen, setActiveScreen] = useState<"workspace" | "camera" | "stream" | "measure" | "roomScan" | "roomViewer">("workspace");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [roomScanProjectId, setRoomScanProjectId] = useState<string>();
   const [viewerProjectId, setViewerProjectId] = useState<string>();
   const [viewerRoomId, setViewerRoomId] = useState<string>();
@@ -41,6 +42,8 @@ export function AppShell() {
   if (activeScreen === "measure") {
     return (
       <MeasurementScreen
+        initialProjectId={selectedProjectId}
+        onProjectChange={setSelectedProjectId}
         initialCatalogObjectId={initialPlacementCatalogObjectId}
         onClose={() => setActiveScreen("workspace")}
       />
@@ -69,6 +72,8 @@ export function AppShell() {
         >
           <View style={styles.canvas}>
             <HomeScreen
+              initialProjectId={selectedProjectId}
+              onProjectChange={setSelectedProjectId}
               onOpenCamera={(photoHandler, onClearPlacements) => {
                 setCameraPhotoHandler(() => photoHandler);
                 setClearPlacementsHandler(() => onClearPlacements);
@@ -78,7 +83,8 @@ export function AppShell() {
                 setClearPlacementsHandler(() => onClearPlacements);
                 setActiveScreen("stream");
               }}
-              onOpenMeasure={(catalogObjectId) => {
+              onOpenMeasure={(projectId, catalogObjectId) => {
+                setSelectedProjectId(projectId);
                 setInitialPlacementCatalogObjectId(catalogObjectId);
                 setActiveScreen("measure");
               }}

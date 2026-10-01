@@ -67,6 +67,8 @@ import { LiveStreamPanel } from "../camera/LiveStreamPanel";
 import { colors } from "../../theme/colors";
 
 interface MeasurementScreenProps {
+  initialProjectId?: string;
+  onProjectChange: (projectId: string | undefined) => void;
   initialCatalogObjectId?: string;
   onClose: () => void;
 }
@@ -354,10 +356,10 @@ function MeasurementSummaryCard({
   );
 }
 
-export function MeasurementScreen({ initialCatalogObjectId, onClose }: MeasurementScreenProps) {
+export function MeasurementScreen({ initialProjectId, onProjectChange, initialCatalogObjectId, onClose }: MeasurementScreenProps) {
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initialProjectId);
   const [selectedRoomId, setSelectedRoomId] = useState<string>();
   const [arSessionId, setARSessionId] = useState<string>();
   const [roomAlignment, setRoomAlignment] = useState<{ roomId: string; sessionId: string; worldFromRoom: Transform3D }>();
@@ -389,15 +391,22 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
     let isMounted = true;
 
     async function loadDocuments() {
-      const documents = await loadProjectDocuments();
+      try {
+        const documents = await loadProjectDocuments();
 
-      if (!isMounted) {
-        return;
+        if (!isMounted) {
+          return;
+        }
+
+        setProjectDocuments(documents);
+        const projectId = documents.find(document => document.project.id === initialProjectId)?.project.id ?? documents[0]?.project.id;
+        setSelectedProjectId(projectId);
+        onProjectChange(projectId);
+      } catch {
+        if (isMounted) setStatus("Projects could not be loaded. Close AR tools and try again; saved data has not been changed.");
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
-
-      setProjectDocuments(documents);
-      setSelectedProjectId((current) => current ?? documents[0]?.project.id);
-      setIsLoading(false);
     }
 
     void loadDocuments();
@@ -414,9 +423,7 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
   }, [initialCatalogObjectId]);
 
   useEffect(() => {
-    if (selectedRoomId) {
-      placementRoomIdRef.current = selectedRoomId;
-    }
+    placementRoomIdRef.current = selectedRoomId;
   }, [selectedRoomId]);
 
   const selectedProjectDocument = useMemo(
@@ -1306,7 +1313,15 @@ export function MeasurementScreen({ initialCatalogObjectId, onClose }: Measureme
               <SelectionChip
                 key={document.project.id}
                 label={document.project.name}
-                onPress={() => setSelectedProjectId(document.project.id)}
+                onPress={() => {
+                  setSelectedProjectId(document.project.id);
+                  onProjectChange(document.project.id);
+                  setSelectedRoomId(document.project.roomCaptures[0]?.id);
+                  placementRoomIdRef.current = document.project.roomCaptures[0]?.id;
+                  setSelectedPlacedObjectId(undefined);
+                  setRoomAlignment(undefined);
+                  clearMultiCaptureSession("Project changed. Align the selected room before placing objects.");
+                }}
                 selected={document.project.id === selectedProjectId}
               />
             ))}

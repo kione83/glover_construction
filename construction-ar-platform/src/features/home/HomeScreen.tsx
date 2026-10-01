@@ -41,12 +41,14 @@ import type { SavedRoomViewerMode } from "../roomViewer/SavedRoomViewerScreen";
 interface HomeScreenProps {
   onOpenCamera: (onPhotoCaptured: (uri: string) => void, onClearPlacements: () => void) => void;
   onOpenStream: (onClearPlacements: () => void) => void;
-  onOpenMeasure: (catalogObjectId?: string) => void;
+  initialProjectId?: string;
+  onProjectChange: (projectId: string | undefined) => void;
+  onOpenMeasure: (projectId: string, catalogObjectId?: string) => void;
   onOpenRoomScan: (projectId: string) => void;
   onOpenRoomViewer: (projectId: string, roomId?: string, mode?: SavedRoomViewerMode) => void;
 }
 
-export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRoomScan, onOpenRoomViewer }: HomeScreenProps) {
+export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, onOpenStream, onOpenMeasure, onOpenRoomScan, onOpenRoomViewer }: HomeScreenProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [isLoading, setIsLoading] = useState(true);
@@ -70,7 +72,9 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
         const documents = await loadProjectDocuments();
         const loadedProjects = documents.map((document) => document.project);
         setProjects(loadedProjects);
-        setSelectedProjectId(loadedProjects[0]?.id);
+        const projectId = loadedProjects.find(project => project.id === initialProjectId)?.id ?? loadedProjects[0]?.id;
+        setSelectedProjectId(projectId);
+        onProjectChange(projectId);
       } catch (error) {
         reportStorageError(error);
       } finally {
@@ -135,6 +139,7 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
     const nextProjects = [document.project, ...projects];
     if (!(await persist(nextProjects))) return;
     setSelectedProjectId(document.project.id);
+    onProjectChange(document.project.id);
     setProjectName("");
     setClientName("");
     setSiteName("");
@@ -510,7 +515,7 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
         <View style={styles.moduleList}>
           {projects.length === 0 && <Text style={styles.empty}>No projects yet.</Text>}
           {projects.map((project) => (
-            <Pressable key={project.id} onPress={() => setSelectedProjectId(project.id)} style={[styles.moduleCard, project.id === selectedProjectId && styles.selectedCard]}>
+            <Pressable key={project.id} onPress={() => { setSelectedProjectId(project.id); onProjectChange(project.id); }} style={[styles.moduleCard, project.id === selectedProjectId && styles.selectedCard]}>
               <Text style={styles.moduleName}>{project.name}</Text>
               <Text style={styles.moduleDescription}>{project.clientName ?? "No client"} · {project.siteName ?? "No site"}</Text>
             </Pressable>
@@ -518,7 +523,7 @@ export function HomeScreen({ onOpenCamera, onOpenStream, onOpenMeasure, onOpenRo
         </View>
       </View>
 
-      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera((uri) => void addProjectPhoto(uri), clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={onOpenMeasure} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} fieldNoteText={fieldNoteText} onFieldNoteTextChange={setFieldNoteText} onAddFieldNote={() => void addFieldNote()} onImportBlueprint={() => void importBlueprint()} onShareProjectSummary={() => void shareProjectSummary()} />}
+      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera((uri) => void addProjectPhoto(uri), clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={(catalogObjectId?: string) => onOpenMeasure(selectedProject.id, catalogObjectId)} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} fieldNoteText={fieldNoteText} onFieldNoteTextChange={setFieldNoteText} onAddFieldNote={() => void addFieldNote()} onImportBlueprint={() => void importBlueprint()} onShareProjectSummary={() => void shareProjectSummary()} />}
     </View>
   );
 }
@@ -534,7 +539,7 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDe
       <Button label="Import floor plan / blueprint" onPress={onImportBlueprint} />
       <Button label="Share layout summary" onPress={() => void onShareProjectSummary()} />
       <Button label="Stream to laptop" onPress={onOpenStream} />
-      <Button label="Open AR tools" onPress={onOpenMeasure} />
+      <Button label="Open AR tools" onPress={() => onOpenMeasure()} />
       <Button label="Scan Room" onPress={onOpenRoomScan} />
       <Button label="View 3D Model" onPress={() => onOpenRoomViewer(project.id, undefined, "project")} />
       {project.roomCaptures.filter((room: RoomCapture) => room.roomScan).length >= 2 && <Button label="Connect Rooms / Manual Alignment" onPress={() => onOpenRoomViewer(project.id, undefined, "alignment")} />}

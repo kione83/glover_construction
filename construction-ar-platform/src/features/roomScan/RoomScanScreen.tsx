@@ -12,11 +12,12 @@ import {
   View,
 } from "react-native";
 
-import { addRoomToSpatialModel, buildScanMeasurementCsv, createScanMeasurementLogEntries, updateProjectSummary, type Project, type RoomCapture, type RoomScanData } from "../../domain";
-import { loadProjectDocuments, loadProjectScan, saveProjectDocuments } from "../../storage/projectRepository";
+import { buildScanMeasurementCsv, createScanMeasurementLogEntries, type Project, type RoomCapture, type RoomScanData } from "../../domain";
+import { loadProjectDocuments, loadProjectScan } from "../../storage/projectRepository";
 import { summarizeProjectScans } from "../../storage/projectDocument";
 import { colors } from "../../theme/colors";
-import { normalizeScanObjects, measurementsForLiveObject, formatObjectDimensions, formatObjectMeasurementDetails } from "../../domain/scannedObjects";
+import { measurementsForLiveObject, formatObjectDimensions, formatObjectMeasurementDetails } from "../../domain/scannedObjects";
+import { persistCompletedScan, toRoomCapture } from "./scanPersistence";
 import { ObjectMeasurementsPanel } from "./ObjectMeasurementsPanel";
 import type { LengthUnit } from "../../domain/spatial";
 import { ControlDrawer } from "../workspace/ControlDrawer";
@@ -33,48 +34,10 @@ interface RoomScanScreenProps {
   onClose: () => void;
 }
 
-function makeRoomId() {
-  return `room-scan-${Date.now()}`;
-}
-
 function measurementFeatureName(category: string, index: number): string {
   if (category === "wall") return `Wall ${index + 1}`;
   if (category === "floor") return "Floor";
   return `${category.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} ${index + 1}`;
-}
-
-function toRoomCapture(project: Project, name: string, scan: RoomScanData): RoomCapture {
-  const roomId = makeRoomId();
-  const surfaces = scan.elements
-    .filter((element) => ["wall", "floor", "ceiling", "opening"].includes(element.kind))
-    .map((element) => ({
-      id: `${roomId}-${element.id}`,
-      kind: element.kind === "opening" ? "opening" : element.kind,
-      label: `${name} ${element.category}`,
-      dimensions: element.dimensions,
-      centerPoint: element.transform.position,
-      confidence: element.confidence,
-    }))
-    .filter((surface) => ["wall", "floor", "ceiling", "opening"].includes(surface.kind));
-
-  const footprint = scan.floorFootprint;
-  return {
-    id: roomId,
-    name: name.trim() || `Room ${project.roomCaptures.length + 1}`,
-    status: "completed",
-    source: "roomplan",
-    unit: "m",
-    measuredDimensions: footprint
-      ? { width: footprint.width, height: scan.ceilingHeight ?? 0, depth: footprint.depth, unit: "m" }
-      : undefined,
-    bounds: footprint
-      ? { center: { x: 0, y: (scan.ceilingHeight ?? 0) / 2, z: 0 }, size: footprint }
-      : undefined,
-    surfaces: surfaces as RoomCapture["surfaces"],
-    notes: "RoomPlan scan. Individual transformed elements preserve irregular room geometry.",
-    capturedAt: scan.capturedAt,
-    roomScan: normalizeScanObjects(scan, roomId),
-  };
 }
 
 export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
@@ -94,15 +57,29 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
   const [measurementUnit, setMeasurementUnit] = useState<LengthUnit>("m");
   const [liveMeasurements, setLiveMeasurements] = useState<NativeRoomScanMeasurement[]>([]);
   const completionHandledRef = useRef(false);
+  const pendingRoomRef = useRef<RoomCapture | undefined>(undefined);
+  const savingRef = useRef(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "failed" | "saved">("idle");
+  const [loadError, setLoadError] = useState(false);
+  const [loadRequest, setLoadRequest] = useState(0);
 
   useEffect(() => {
+    let mounted = true;
+    setLoadError(false);
     void loadProjectDocuments().then((documents) => {
+      if (!mounted) return;
       const selected = documents.find((document) => document.project.id === projectId)?.project;
       setProject(selected);
       if (selected) setRoomName(`Room ${selected.roomCaptures.length + 1}`);
+      setLoadError(!selected);
       setStatus(selected ? "Move slowly around the room to capture walls and major contents." : "Project could not be loaded.");
+    }).catch(() => {
+      if (!mounted) return;
+      setLoadError(true);
+      setStatus("Project storage could not be loaded. Retry before starting a scan.");
     });
-  }, [projectId]);
+    return () => { mounted = false; };
+  }, [projectId, loadRequest]);
 
   const layoutItems = useMemo(
     () => (scan?.elements ?? [])
@@ -139,46 +116,61 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
     });
   }, [liveMeasurements]);
 
-  async function persistScan(completedScan: RoomScanData) {
-    if (!project) return;
-    const documents = await loadProjectDocuments();
-    const room = toRoomCapture(project, roomName, completedScan);
-    const updatedProject = updateProjectSummary({
-      ...addRoomToSpatialModel(project, room.id),
-      status: "scanned",
-      roomCaptures: [...project.roomCaptures, room],
-    });
-    const updatedDocuments = documents.map((document) =>
-      document.project.id === project.id
-        ? {
-            ...document,
-            project: updatedProject,
-            scanMeasurementLogEntries: [
-              ...(document.scanMeasurementLogEntries ?? []),
-              ...createScanMeasurementLogEntries(project.id, room.id, completedScan),
-            ],
-          }
-        : document,
-    );
-    await saveProjectDocuments(updatedDocuments);
-    // The archive is now durable on the device. Keep only the project index in
-    // this screen so closing/reopening a scan does not retain its heavy payload.
-    setProject(summarizeProjectScans(updatedProject));
-    setSavedRoomId(room.id);
-    setSavedRoomSummary({
-      wallCount: completedScan.elements.filter((element) => element.kind === "wall").length,
-      contentCount: completedScan.elements.filter((element) => ["furniture", "built-in", "fixture"].includes(element.kind)).length,
-      ceilingHeight: completedScan.ceilingHeight,
-    });
-    setScan(undefined);
-    setLiveMeasurements([]);
-    setStatus("Room Scan saved to this project. The room can be reconstructed without scanning again.");
-    setIsFinished(true);
-    setDrawerExpanded(true);
+  async function persistScan() {
+    const room = pendingRoomRef.current;
+    if (!room?.roomScan || savingRef.current) return;
+    const completedScan = room.roomScan;
+    savingRef.current = true;
+    setSaveState("saving");
+    setStatus("Saving completed scan… Keep this screen open.");
+    try {
+      const updatedProject = await persistCompletedScan(projectId, room);
+      // The archive is now durable on the device. Keep only the project index in
+      // this screen so closing/reopening a scan does not retain its heavy payload.
+      setProject(summarizeProjectScans(updatedProject));
+      setSavedRoomId(room.id);
+      setSavedRoomSummary({
+        wallCount: completedScan.elements.filter((element) => element.kind === "wall").length,
+        contentCount: completedScan.elements.filter((element) => ["furniture", "built-in", "fixture"].includes(element.kind)).length,
+        ceilingHeight: completedScan.ceilingHeight,
+      });
+      setScan(undefined);
+      setLiveMeasurements([]);
+      setStatus("Room Scan saved to this project. The room can be reconstructed without scanning again.");
+      setIsFinished(true);
+      setSaveState("saved");
+      pendingRoomRef.current = undefined;
+      setDrawerExpanded(true);
+    } catch {
+      setSaveState("failed");
+      setStatus("Scan captured, but saving failed. Your capture is still here. Retry saving before closing.");
+      setDrawerExpanded(true);
+    } finally {
+      savingRef.current = false;
+    }
+  }
+
+  function requestClose() {
+    if (savingRef.current) {
+      Alert.alert("Saving scan", "Please wait for the save to finish before closing.");
+    } else if (pendingRoomRef.current) {
+      Alert.alert("Scan has not been saved", "Keep this screen open and retry saving to preserve the completed capture.", [
+        { text: "Keep scan", style: "cancel" },
+        { text: "Retry save", onPress: () => { void persistScan(); } },
+        { text: "Discard and close", style: "destructive", onPress: onClose },
+      ]);
+    } else if (!isFinished && project) {
+      Alert.alert("Finish this scan?", "Finish and save the capture before leaving, or discard it.", [
+        { text: "Continue scanning", style: "cancel" },
+        { text: "Finish and save", onPress: () => setFinishRequestId(value => value + 1) },
+        { text: "Discard and close", style: "destructive", onPress: onClose },
+      ]);
+    } else onClose();
   }
 
   function handleNativeUpdate(event: { nativeEvent: NativeRoomScanUpdate }) {
     const update = event.nativeEvent;
+    if (completionHandledRef.current) return;
     setStatus(update.message);
     if (typeof update.progress === "number") setProgress(update.progress);
     if (update.measurements) setLiveMeasurements(update.measurements);
@@ -206,7 +198,11 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
         portal: { format: "construction-ar-room-scan", version: 1 },
       };
       setScan(completedScan);
-      void persistScan(completedScan);
+      setIsFinished(true);
+      if (project) {
+        pendingRoomRef.current = toRoomCapture(project, roomName, completedScan, `room-scan-${Date.now()}`);
+        void persistScan();
+      }
     }
   }
 
@@ -245,27 +241,29 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
           <Text style={styles.eyebrow}>PROJECT WORKSPACE</Text>
           <Text style={styles.title}>Room Scan</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Close Room Scan" onPress={onClose} style={styles.closeButton}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Close Room Scan" onPress={requestClose} style={styles.closeButton}>
           <Text style={styles.closeButtonText}>Close</Text>
         </Pressable>
       </View>
       <View style={styles.viewport}>
-        <NativeRoomScanView
+        {project && <NativeRoomScanView
           finishRequestId={finishRequestId}
           onRoomScanUpdate={handleNativeUpdate}
           startRequestId={startRequestId}
           showMeasurements={showMeasurements}
           style={StyleSheet.absoluteFill}
-        />
+        />}
           <View pointerEvents="none" style={styles.statusOverlay}>
           <Text style={styles.statusText}>{status}</Text>
           <View style={styles.progressTrack}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /></View>
         </View>
-        {!isFinished && <Pressable accessibilityRole="button" accessibilityLabel="Finish and save scan" onPress={() => setFinishRequestId(value => value + 1)} style={styles.floatingFinish}><Text style={styles.finishButtonText}>Finish & save</Text></Pressable>}
+        {project && !isFinished && <Pressable accessibilityRole="button" accessibilityLabel="Finish and save scan" onPress={() => setFinishRequestId(value => value + 1)} style={styles.floatingFinish}><Text style={styles.finishButtonText}>Finish & save</Text></Pressable>}
       </View>
       <ControlDrawer expanded={drawerExpanded} onChange={setDrawerExpanded} label="Scan controls">
       <ScrollView contentContainerStyle={styles.content} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled">
-        {!isFinished && (
+        {loadError && <Pressable accessibilityRole="button" style={styles.button} onPress={() => setLoadRequest(value => value + 1)}><Text style={styles.buttonText}>Retry loading project</Text></Pressable>}
+        {saveState === "failed" && <Pressable accessibilityRole="button" style={styles.button} onPress={() => { void persistScan(); }}><Text style={styles.buttonText}>Retry saving scan</Text></Pressable>}
+        {project && !isFinished && (
           <View style={styles.controls}>
             <Text style={styles.label}>Saved room name</Text>
             <TextInput value={roomName} onChangeText={setRoomName} style={styles.input} />
@@ -304,11 +302,11 @@ export function RoomScanScreen({ projectId, onClose }: RoomScanScreenProps) {
           <View style={styles.summary}>
             <Text style={styles.summaryTitle}>Saved room model</Text>
             <Text style={styles.summaryText}>{savedRoomSummary.wallCount} walls · {savedRoomSummary.contentCount} contents · {savedRoomSummary.ceilingHeight ? `${savedRoomSummary.ceilingHeight.toFixed(2)} m ceiling` : "ceiling height unavailable"}</Text>
-            <Pressable style={styles.button} onPress={() => void exportScanMeasurements()}><Text style={styles.buttonText}>Export scan estimates</Text></Pressable>
+            <Pressable style={styles.button} onPress={() => void exportScanMeasurements().catch(() => Alert.alert("Export failed", "The scan is saved. Please retry the export."))}><Text style={styles.buttonText}>Export scan estimates</Text></Pressable>
           </View>
         )}
         {savedRoomId && <ObjectMeasurementsPanel room={project?.roomCaptures.find(room => room.id === savedRoomId)} />}
-        {isFinished && <Pressable style={styles.button} onPress={onClose}><Text style={styles.buttonText}>Back to project</Text></Pressable>}
+        {isFinished && <Pressable style={styles.button} onPress={requestClose}><Text style={styles.buttonText}>Back to project</Text></Pressable>}
       </ScrollView>
       </ControlDrawer>
     </SafeAreaView>
