@@ -2,6 +2,14 @@ import type { ValidationRule } from "./projects";
 
 export const defaultValidationRules: ValidationRule[] = [
   {
+    id: "scanned-obstacle-check",
+    type: "collision",
+    name: "Scanned furniture and fixture fit",
+    description: "Compare proposed objects and planning clearance envelopes against captured furniture, fixtures and built-ins. Scan envelopes are approximate; walls, openings and uncaptured objects are not checked.",
+    severity: "warning",
+    appliesToCategories: ["architectural", "electrical", "hvac", "life-safety", "low-voltage", "plumbing", "general", "furniture"],
+  },
+  {
     id: "placement-frame-check",
     type: "collision",
     name: "Placement alignment and size",

@@ -1,3 +1,4 @@
+import { scannedObstacleBoxes } from "./scannedObstacles";
 import { starterCatalog } from "./catalog";
 import type {
   CatalogObject,
@@ -18,6 +19,7 @@ export function validateProject(project: Project, detectedAt = new Date().toISOS
     ...validateAttachments(project, catalogById, detectedAt),
     ...validateCollisions(project, catalogById, detectedAt),
     ...validateClearances(project, catalogById, detectedAt),
+    ...validateScannedObstacles(project, catalogById, detectedAt),
   ];
 
   return issues;
@@ -85,6 +87,29 @@ function validateClearances(project: Project, catalogById: Map<string, CatalogOb
       const otherBounds = otherObject.roomLocalTransform && placementBox(otherObject.roomLocalTransform, otherObject.dimensions);
       if (otherBounds && placementBoxesOverlap(clearanceBounds, otherBounds)) {
         issues.push(issue(rule.id, rule.severity, `${otherObject.displayName} enters ${placedObject.displayName}'s planning clearance envelope. Confirm actual working-space requirements before installation.`, placedObject.id, undefined, detectedAt, `${placedObject.id}-${otherObject.id}`));
+      }
+    }
+  }
+  return issues;
+}
+
+function validateScannedObstacles(project: Project, catalogById: Map<string, CatalogObject>, detectedAt: string): ValidationIssue[] {
+  const rule = getRule("scanned-obstacle-check");
+  const issues: ValidationIssue[] = [];
+  for (const room of project.roomCaptures) {
+    const obstacles = scannedObstacleBoxes(project, room);
+    for (const object of project.placedObjects) {
+      if (object.status !== "active" || object.roomCaptureId !== room.id || !object.roomLocalTransform) continue;
+      const box = placementBox(object.roomLocalTransform, object.dimensions);
+      if (!box) continue;
+      const clearance = catalogById.get(object.catalogObjectId)?.defaultClearance;
+      const clearanceBox = clearance && placementBox(object.roomLocalTransform, clearance);
+      for (const obstacle of obstacles) {
+        const overlaps = placementBoxesOverlap(box, obstacle.box);
+        if (!overlaps && !(clearanceBox && placementBoxesOverlap(clearanceBox, obstacle.box))) continue;
+        issues.push({ ...issue(rule.id, rule.severity,
+          `${object.displayName} ${overlaps ? "may overlap" : "has a planning clearance envelope intersecting"} scanned ${obstacle.label} in ${room.name}. Review the approximate captured envelope and verify the actual space before installation.`,
+          object.id, undefined, detectedAt, `${object.id}-${room.id}-${obstacle.id}`), relatedScanElementId: obstacle.id });
       }
     }
   }

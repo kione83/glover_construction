@@ -643,7 +643,7 @@ function RoomConnectionPanel({ project, onSave }: { project: Project; onSave: (i
 
 function ValidationResults({ project }: { project: Project }) {
   if (!project.summary.lastValidatedAt) return <Text style={styles.empty}>Run validation to review this layout.</Text>;
-  if (project.validationIssues.length === 0) return <Text style={styles.success}>No validation issues found.</Text>;
+  if (project.validationIssues.length === 0) return <Text style={styles.success}>No issues found in checked envelopes. Scan coverage is incomplete: walls, openings and uncaptured objects are not checked. Confirm fit on site.</Text>;
   const errors = project.validationIssues.filter((item: any) => item.severity === "error");
   const warnings = project.validationIssues.filter((item: any) => item.severity === "warning");
   return <View style={styles.issueList}>{errors.length > 0 && <Text style={styles.errorLabel}>Errors ({errors.length})</Text>}{warnings.length > 0 && <Text style={styles.warningLabel}>Warnings ({warnings.length})</Text>}{project.validationIssues.map((item: any, index: number) => <View key={`${item.id}-${index}`} style={styles.issue}><Text style={item.severity === "error" ? styles.errorLabel : styles.warningLabel}>{item.severity.toUpperCase()} · {defaultValidationRules.find((rule) => rule.id === item.ruleId)?.name ?? item.ruleId}</Text><Text style={styles.moduleDescription}>{item.message}</Text></View>)}</View>;

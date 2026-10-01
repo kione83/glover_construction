@@ -308,6 +308,7 @@ export interface ValidationRule {
 }
 
 export interface ValidationIssue {
+  relatedScanElementId?: string;
   id: string;
   ruleId: string;
   severity: ValidationSeverity;

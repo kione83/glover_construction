@@ -25,7 +25,7 @@ export function catalogViewerTransforms(project: Project | undefined, edits: Cat
 }
 
 export function applyCatalogPlacementEdits(project: Project, edits: CatalogPlacementEdits, updatedAt = new Date().toISOString()): Project {
-  if (!Object.keys(edits).length) return project;
+  if (!Object.keys(edits).length) return { ...project, validationIssues: validateProject(project, updatedAt) };
   const next: Project = { ...project, placedObjects: project.placedObjects.map(object =>
     object.status === "active" && object.roomLocalTransform && edits[object.id] ? {
       ...object,
