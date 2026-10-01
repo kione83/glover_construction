@@ -71,3 +71,26 @@ describe("saved model loading", () => {
     expect(renderer.root.findAllByType("NativeSavedRoom3DView" as any)).toHaveLength(1);
   });
 });
+
+describe("proposed object editing", () => {
+  it("moves and rotates a catalog object through the existing controls, saves it, and keeps geometry off the update bridge", async () => {
+    const documents = await mocks.load();
+    const transform = { position: { x: 1, y: 0.5, z: 2 }, rotation: { pitch: 0, yaw: 0, roll: 0 }, scale: { x: 1, y: 1, z: 1 } };
+    documents[0].project.placedObjects.push({ id: "proposal", catalogObjectId: "furniture-sofa", roomCaptureId: rooms[0].id, anchorId: "source-anchor", displayName: "Sofa", transform, roomLocalTransform: transform, dimensions: { width: 2, height: 1, depth: 1, unit: "m" }, status: "active", placedAt: "2026-10-01", updatedAt: "2026-10-01" });
+    await open();
+    const geometry = native().props.modelJSON;
+    await act(async () => native().props.onSceneSelection({ nativeEvent: { kind: "feature", roomId: rooms[0].id, featureId: "placed:proposal" } }));
+    const controls = () => renderer.root.findByType("PlacementControls" as any);
+    expect(controls().props.enabled).toBe(true);
+    await act(async () => controls().props.onMove(1, 0));
+    await act(async () => controls().props.onRotate(1));
+    const bridge = JSON.parse(native().props.objectTransformsJSON);
+    expect(bridge[rooms[0].id]["placed:proposal"].position).toEqual({ x: 1.1, y: 0.5, z: 2 });
+    expect(native().props.modelJSON).toBe(geometry);
+    await act(async () => controls().props.onPlace());
+    const saved = mocks.save.mock.calls.at(-1)![0][0].project;
+    expect(saved.placedObjects[0].roomLocalTransform.position.x).toBeCloseTo(1.1);
+    expect(saved.placedObjects[0].roomLocalTransform.rotation.yaw).toBeCloseTo(5 * Math.PI / 180);
+    expect(saved.roomCaptures).toEqual(documents[0].project.roomCaptures);
+  });
+});

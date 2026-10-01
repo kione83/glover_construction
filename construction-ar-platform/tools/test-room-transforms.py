@@ -219,6 +219,15 @@ reopenedHierarchy.objectTransformsJSON = hierarchy.objectTransformsJSON
 reopenedHierarchy.applyObjectTransforms()
 precondition(reopenedObjects[0].simdWorldTransform == target.simdWorldTransform)
 print("PASS: production object override bridge moves only the selected child, preserves room/other objects, and restores placement on reopen")
+// Proposed catalog placements use the same incremental feature-node bridge.
+let proposed = roomB.childNode(withName: "feature|B|placed:proposed", recursively: false)!
+let proposedPose = rigid(-.pi / 4, SIMD3(4, 1.2, 2))
+hierarchy.objectTransformsJSON = String(data: try JSONSerialization.data(withJSONObject: ["B": ["placed:proposed": hierarchy.matrixTransform(proposedPose)]]), encoding: .utf8)!
+hierarchy.applyObjectTransforms()
+precondition(proposed.simdTransform == proposedPose)
+precondition(proposed.simdWorldTransform == roomB.simdTransform * proposedPose)
+precondition(sibling.simdTransform == siblingPose && roomB.simdTransform == parentPose)
+print("PASS: proposed catalog placement bridge updates its existing native node without moving siblings or the parent room")
 // Full production assembly parenting: related entities, their label anchors and
 // descendant hit targets must all resolve to one movable owner.
 for category in ["appliance", "storage", "table", "chair"] {
