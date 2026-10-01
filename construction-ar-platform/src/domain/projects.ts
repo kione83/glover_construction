@@ -333,6 +333,7 @@ export interface ProjectPhoto {
 }
 
 export interface ProjectFieldNote {
+  location?: { roomCaptureId: string; placedObjectId?: string; label: string };
   id: string;
   text: string;
   createdAt: string;

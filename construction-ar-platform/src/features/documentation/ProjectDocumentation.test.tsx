@@ -1,0 +1,41 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, create, type ReactTestRenderer, type ReactTestInstance } from "react-test-renderer";
+const mocks = vi.hoisted(() => ({ preview: vi.fn(), alert: vi.fn() }));
+vi.mock("react-native", () => ({ ActivityIndicator: "ActivityIndicator", Image: "Image", Text: "Text", TextInput: "TextInput", View: "View", Pressable: "Pressable", ScrollView: "ScrollView", StyleSheet: { create: (value: any) => value }, Platform: { OS: "ios" }, NativeModules: { ProjectDocumentPreview: { openDocument: mocks.preview } }, Alert: { alert: mocks.alert } }));
+import { ProjectDocumentation } from "./ProjectDocumentation";
+import { createEmptyProjectDocument } from "../../storage/projectDocument";
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+let renderer: ReactTestRenderer;
+afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); vi.clearAllMocks(); });
+const text = (node: ReactTestInstance): string => node.children.map(child => typeof child === "string" ? child : text(child)).join("");
+const button = (label: string) => renderer.root.findAllByType("Pressable" as any).find(node => text(node) === label)!;
+const project = () => createEmptyProjectDocument({ id: "p", name: "Documentation", fieldNotes: Array.from({ length: 24 }, (_, i) => ({ id: `n-${i}`, text: `Site observation ${i}`, createdAt: "2026-10-01" })), photos: Array.from({ length: 25 }, (_, i) => ({ id: `p-${i}`, uri: `file:///documents/photo-${i}.jpg`, capturedAt: "2026-10-01" })) }).project;
+describe("complete project documentation", () => {
+  it("reaches every saved note/photo and searches older notes beyond the first page", async () => {
+    await act(async () => { renderer = create(<ProjectDocumentation project={project()} onSaveNote={async () => true} />); });
+    expect(text(renderer.root)).not.toContain("Site observation 23");
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Search field notes" }).props.onChangeText("observation 23"));
+    expect(text(renderer.root)).toContain("Site observation 23");
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Search field notes" }).props.onChangeText(""));
+    await act(async () => button("Show more notes").props.onPress());
+    await act(async () => button("Show more notes").props.onPress());
+    expect(text(renderer.root)).toContain("Showing 24 of 24 notes");
+    await act(async () => button("Show more photos").props.onPress());
+    await act(async () => button("Show more photos").props.onPress());
+    expect(renderer.root.findAllByType("Image" as any)).toHaveLength(25);
+    const photo = renderer.root.findAllByType("Pressable" as any).find(node => node.findAllByType("Image" as any).some(image => image.props.source.uri.endsWith("photo-24.jpg")))!;
+    await act(async () => photo.props.onPress());
+    expect(mocks.preview).toHaveBeenCalledWith("file:///documents/photo-24.jpg", expect.stringContaining("Site photo"));
+  });
+  it("retains an unsaved note and clears it only after a successful retry", async () => {
+    const save = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await act(async () => { renderer = create(<ProjectDocumentation project={project()} onSaveNote={save} />); });
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Field note" }).props.onChangeText("Keep my draft"));
+    await act(async () => button("Save note").props.onPress());
+    expect(renderer.root.findByProps({ accessibilityLabel: "Field note" }).props.value).toBe("Keep my draft");
+    expect(text(renderer.root)).toContain("draft is retained");
+    await act(async () => button("Save note").props.onPress());
+    expect(renderer.root.findByProps({ accessibilityLabel: "Field note" }).props.value).toBe("");
+    expect(text(renderer.root)).toContain("Note saved.");
+  });
+});

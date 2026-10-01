@@ -24,10 +24,10 @@ export function AppShell() {
   const [viewerRoomId, setViewerRoomId] = useState<string>();
   const [viewerMode, setViewerMode] = useState<SavedRoomViewerMode>("project");
   const [initialPlacementCatalogObjectId, setInitialPlacementCatalogObjectId] = useState<string>();
-  const [cameraPhotoHandler, setCameraPhotoHandler] = useState<(uri: string) => void>(() => () => undefined);
+  const [cameraPhotoHandler, setCameraPhotoHandler] = useState<(uri: string) => Promise<void>>(() => async () => undefined);
   const [clearPlacementsHandler, setClearPlacementsHandler] = useState<() => void>(() => () => undefined);
-  const onPhotoCaptured = (uri: string) => {
-    cameraPhotoHandler(uri);
+  const onPhotoCaptured = async (uri: string) => {
+    await cameraPhotoHandler(uri);
     setActiveScreen("workspace");
   };
 

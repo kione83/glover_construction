@@ -1,3 +1,5 @@
+import { ProjectDocumentation } from "../documentation/ProjectDocumentation";
+import { addProjectFieldNote, type FieldNoteInput } from "../../domain/fieldNotes";
 import { CatalogBrowser } from "../catalog/CatalogBrowser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
@@ -42,7 +44,7 @@ import { colors } from "../../theme/colors";
 import type { SavedRoomViewerMode } from "../roomViewer/SavedRoomViewerScreen";
 
 interface HomeScreenProps {
-  onOpenCamera: (onPhotoCaptured: (uri: string) => void, onClearPlacements: () => void) => void;
+  onOpenCamera: (onPhotoCaptured: (uri: string) => Promise<void>, onClearPlacements: () => void) => void;
   onOpenStream: (onClearPlacements: () => void) => void;
   initialProjectId?: string;
   onProjectChange: (projectId: string | undefined) => void;
@@ -61,7 +63,10 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
   const [siteName, setSiteName] = useState("");
   const [roomName, setRoomName] = useState("");
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState<string>();
-  const [fieldNoteText, setFieldNoteText] = useState("");
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const mutationCount = useRef(0);
+  const mutationQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingPhoto = useRef<{ uri: string; id: string } | undefined>(undefined);
   const [storageError, setStorageError] = useState<string>();
   const [alternativeName, setAlternativeName] = useState("");
   const [isNamingAlternative, setIsNamingAlternative] = useState(false);
@@ -155,7 +160,7 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
   }
 
   async function createAlternative() {
-    if (!selectedProject || duplicatingRef.current) return;
+    if (!selectedProject || duplicatingRef.current || mutationCount.current) return;
     duplicatingRef.current = true;
     setIsDuplicating(true);
     try {
@@ -174,12 +179,23 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
     }
   }
 
-  async function updateSelectedProject(update: (project: Project) => Project) {
-    if (!selectedProject) return;
-    const updatedProject = update(selectedProject);
-    await persist(
-      projects.map((project) => (project.id === updatedProject.id ? updatedProject : project)),
-    );
+  async function updateSelectedProject(update: (project: Project) => Project): Promise<boolean> {
+    const projectId = selectedProject?.id;
+    if (!projectId) return false;
+    mutationCount.current += 1; setIsSavingProject(true);
+    const task = mutationQueue.current.catch(() => undefined).then(async () => {
+      const documents = await loadProjectDocuments();
+      const current = documents.find(document => document.project.id === projectId);
+      if (!current) throw new Error("This project is no longer available.");
+      const updatedProject = updateProjectSummary(update(current.project));
+      const updated = documents.map(document => document.project.id === projectId ? { ...document, project: updatedProject } : document);
+      const saved = await saveProjectDocuments(updated);
+      setProjects((saved ?? updated).map(document => document.project));
+      setStorageError(undefined);
+    });
+    mutationQueue.current = task;
+    try { await task; return true; } catch (error) { reportStorageError(error); return false; }
+    finally { mutationCount.current -= 1; setIsSavingProject(mutationCount.current > 0); }
   }
 
   async function addManualRoom() {
@@ -200,33 +216,31 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
         label: `${name} ${kind}`,
       })),
     };
-    await updateSelectedProject((project) =>
+    const saved = await updateSelectedProject((project) =>
       updateProjectSummary({
         ...addRoomToSpatialModel(project, roomId),
         status: "scanned",
         roomCaptures: [...project.roomCaptures, room],
       }),
     );
-    setRoomName("");
+    if (saved) setRoomName("");
   }
 
-  async function addFieldNote() {
-    const text = fieldNoteText.trim();
-    if (!text || !selectedProject) return;
-    const note = { id: `note-${Date.now()}`, text, createdAt: new Date().toISOString() };
-    await updateSelectedProject((project) => ({ ...project, fieldNotes: [note, ...project.fieldNotes] }));
-    setFieldNoteText("");
+  async function addFieldNote(input: FieldNoteInput) {
+    const id = `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return updateSelectedProject(project => addProjectFieldNote(project, input, id));
   }
 
-  async function addProjectPhoto(uri: string) {
-    if (!selectedProject) return;
-    const photo = { id: `photo-${Date.now()}`, uri: "", capturedAt: new Date().toISOString() };
-    try {
-      photo.uri = await persistProjectMedia(selectedProject.id, photo.id, uri);
-      await updateSelectedProject((project) => ({ ...project, photos: [photo, ...project.photos] }));
-    } catch (error) {
-      reportStorageError(error);
-    }
+  async function addProjectPhoto(uri: string): Promise<void> {
+    if (!selectedProject) throw new Error("Select a project before saving this photo.");
+    const documents = await loadProjectDocuments();
+    const current = documents.find(document => document.project.id === selectedProject.id);
+    if (!current) throw new Error("This project is no longer available.");
+    if (pendingPhoto.current?.uri !== uri) pendingPhoto.current = { uri, id: `photo-${Date.now()}` };
+    const photo = { id: pendingPhoto.current.id, uri, capturedAt: new Date().toISOString() };
+    const project = updateProjectSummary({ ...current.project, photos: [photo, ...current.project.photos.filter(item => item.id !== photo.id)] });
+    await saveProjectDocuments(documents.map(document => document.project.id === project.id ? { ...document, project } : document));
+    pendingPhoto.current = undefined;
   }
 
   async function importBlueprint() {
@@ -523,12 +537,13 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} pointerEvents={isSavingProject ? "none" : "auto"}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Construction AR Platform</Text>
         <Text style={styles.title}>Project workspace</Text>
       </View>
 
+      {isSavingProject && <View accessibilityLiveRegion="polite"><ActivityIndicator color={colors.accent} /><Text style={styles.helper}>Saving project…</Text></View>}
       {storageError && <Text style={styles.storageError}>Storage warning: {storageError}</Text>}
 
       <View style={styles.panel}>
@@ -567,12 +582,12 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
         </> : <Button label="Duplicate as design alternative" onPress={() => { setAlternativeName(`${selectedProject.name} - alternative`.slice(0, 120)); setAlternativeNotice(undefined); setIsNamingAlternative(true); }} />}
       </View>}
 
-      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera((uri) => void addProjectPhoto(uri), clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={(catalogObjectId?: string) => onOpenMeasure(selectedProject.id, catalogObjectId)} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} fieldNoteText={fieldNoteText} onFieldNoteTextChange={setFieldNoteText} onAddFieldNote={() => void addFieldNote()} onImportBlueprint={() => void importBlueprint()} onShareProjectSummary={() => void shareProjectSummary()} />}
+      {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera(addProjectPhoto, clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={(catalogObjectId?: string) => onOpenMeasure(selectedProject.id, catalogObjectId)} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} onAddFieldNote={addFieldNote} onImportBlueprint={() => void importBlueprint()} onShareProjectSummary={() => void shareProjectSummary()} />}
     </View>
   );
 }
 
-function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDeleteRoom, onDeleteAllScans, onDeleteAllScansEverywhere, onSaveRoomConnection, onOpenRoomViewer, selectedCatalogObjectId, onSelectCatalogObject, onPlaceObject, onRunValidation, onOpenCamera, onOpenStream, onClearPlacements, onOpenMeasure, onOpenRoomScan, fieldNoteText, onFieldNoteTextChange, onAddFieldNote, onImportBlueprint, onShareProjectSummary }: any) {
+function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDeleteRoom, onDeleteAllScans, onDeleteAllScansEverywhere, onSaveRoomConnection, onOpenRoomViewer, selectedCatalogObjectId, onSelectCatalogObject, onPlaceObject, onRunValidation, onOpenCamera, onOpenStream, onClearPlacements, onOpenMeasure, onOpenRoomScan, onAddFieldNote, onImportBlueprint, onShareProjectSummary }: any) {
   const selectedCatalogObject = starterCatalog.find((item) => item.id === selectedCatalogObjectId);
   return <View style={styles.panel}>
     <Text style={styles.panelTitle}>{project.name}</Text>
@@ -596,8 +611,7 @@ function ProjectDashboard({ project, roomName, onRoomNameChange, onAddRoom, onDe
     <CatalogBrowser selectedId={selectedCatalogObjectId} onSelect={onSelectCatalogObject} />
     {selectedCatalogObject && <Button label={`Open AR placement for ${selectedCatalogObject.name}`} onPress={() => onOpenMeasure(selectedCatalogObject.id)} />}
     {project.placedObjects.length > 0 && <><Text style={styles.sectionLabel}>Current layout</Text>{project.placedObjects.filter((item: any) => item.status === "active").map((item: any, index: number) => <Text key={`${item.id}-${index}`} style={styles.layoutItem}>{item.displayName}</Text>)}</>}
-    <View style={styles.form}><Text style={styles.sectionLabel}>Field notes</Text><Field label="Add a note" value={fieldNoteText} onChangeText={onFieldNoteTextChange} /><Button label="Save note" onPress={onAddFieldNote} />{project.fieldNotes.length === 0 ? <Text style={styles.empty}>No field notes yet.</Text> : project.fieldNotes.slice(0, 5).map((note: any) => <View key={note.id} style={styles.note}><Text style={styles.moduleDescription}>{note.text}</Text><Text style={styles.noteDate}>{new Date(note.createdAt).toLocaleString()}</Text></View>)}</View>
-    <View style={styles.form}><Text style={styles.sectionLabel}>Site photos ({project.photos.length})</Text>{project.photos.length === 0 ? <Text style={styles.empty}>No site photos yet.</Text> : <View style={styles.photoGrid}>{project.photos.slice(0, 6).map((photo: any) => <Image key={photo.id} source={{ uri: photo.uri }} style={styles.photo} accessibilityLabel="Project site photo" />)}</View>}</View>
+    <ProjectDocumentation key={project.id} project={project} onSaveNote={onAddFieldNote} />
     <View style={styles.validationHeader}><Text style={styles.sectionLabel}>Validation</Text><Button label="Run validation" onPress={onRunValidation} /></View>
     <ValidationResults project={project} />
   </View>;

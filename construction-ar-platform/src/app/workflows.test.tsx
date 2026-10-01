@@ -236,3 +236,27 @@ describe("observed mounting surface workflow", () => {
     expect(documents[0].project.anchors).toHaveLength(0);
   });
 });
+
+describe("project documentation persistence", () => {
+  it("keeps the camera open until photo persistence finishes", async () => {
+    await act(async () => { renderer = create(<AppShell />); });
+    let finish!: () => void;
+    const handler = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    await act(async () => renderer.root.findByType(HomeScreen).props.onOpenCamera(handler, () => {}));
+    let pending: Promise<void>;
+    await act(async () => { pending = renderer.root.findByType("LiveCameraScreen" as any).props.onPhotoCaptured("file:///tmp/photo.jpg"); });
+    expect(renderer.root.findAllByType(HomeScreen)).toHaveLength(0);
+    expect(handler).toHaveBeenCalledWith("file:///tmp/photo.jpg");
+    await act(async () => { finish(); await pending; });
+    expect(renderer.root.findAllByType(HomeScreen)).toHaveLength(1);
+  });
+  it("saves notes to the latest selected project without losing concurrent metadata", async () => {
+    await act(async () => { renderer = create(<HomeScreen initialProjectId="B" onProjectChange={() => {}} onOpenMeasure={() => {}} onOpenCamera={() => {}} onOpenStream={() => {}} onOpenRoomScan={() => {}} onOpenRoomViewer={() => {}} />); });
+    documents[1] = { ...documents[1], project: { ...documents[1].project, siteName: "Latest saved site" } };
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Field note" }).props.onChangeText("Review kitchen wiring"));
+    await press("Save note");
+    expect(documents[1].project.fieldNotes[0].text).toBe("Review kitchen wiring");
+    expect(documents[1].project.siteName).toBe("Latest saved site");
+    expect(documents[0].project.fieldNotes).toHaveLength(0);
+  });
+});
