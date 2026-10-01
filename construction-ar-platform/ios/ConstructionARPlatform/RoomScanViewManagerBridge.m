@@ -11,6 +11,8 @@ RCT_EXPORT_VIEW_PROPERTY(showMeasurements, BOOL)
 
 @interface RCT_EXTERN_MODULE(SavedRoom3DViewManager, RCTViewManager)
 
+RCT_EXPORT_VIEW_PROPERTY(snapshotRequestJSON, NSString)
+RCT_EXPORT_VIEW_PROPERTY(onSnapshotResult, RCTBubblingEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(modelJSON, NSString)
 RCT_EXPORT_VIEW_PROPERTY(roomTransformsJSON, NSString)
 RCT_EXPORT_VIEW_PROPERTY(objectTransformsJSON, NSString)
@@ -26,4 +28,11 @@ RCT_EXPORT_VIEW_PROPERTY(focusRequestId, NSNumber)
 RCT_EXPORT_VIEW_PROPERTY(onSceneSelection, RCTBubblingEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onRoomTransformChange, RCTBubblingEventBlock)
 
+@end
+
+@interface RCT_EXTERN_MODULE(ProjectDocumentPreview, NSObject)
+RCT_EXTERN_METHOD(openDocument:(NSString *)uri
+                  title:(NSString *)title
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 @end

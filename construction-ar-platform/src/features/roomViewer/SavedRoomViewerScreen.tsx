@@ -1,5 +1,6 @@
+import * as FileSystem from "expo-file-system/legacy";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Share, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import {
   identityTransform,
@@ -52,6 +53,9 @@ function connectionTypeFor(feature?: RoomScanElement): "door" | "doorway" | "sha
 }
 
 export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: SavedRoomViewerScreenProps) {
+  const [snapshotRequestJSON, setSnapshotRequestJSON] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const exportRequest = useRef<number | undefined>(undefined);
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const [objectTransforms, setObjectTransforms] = useState<ObjectPlacements>({});
   const [placementActive, setPlacementActive] = useState(false);
@@ -151,6 +155,42 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
   async function closeViewer() {
     try { await saveLayout(); onClose(); }
     catch { Alert.alert("Layout not saved", "Please retry Save layout before closing. Your scans are safe."); }
+  }
+
+  async function shareLayoutImage() {
+    if (exportRequest.current !== undefined || !project || !loaded) return;
+    const requestId = Date.now();
+    exportRequest.current = requestId;
+    setIsExporting(true);
+    setPlacementActive(false);
+    setMoveMode(false);
+    try {
+      await saveLayout();
+      const omitted = project.placedObjects.filter(object => object.status === "active" && !object.roomLocalTransform && (mode !== "room" || object.roomCaptureId === selectedRoomId)).length;
+      setSnapshotRequestJSON(JSON.stringify({ requestId,
+        title: `${project.name} · ${mode === "room" ? selectedRoom?.name ?? "Room" : "Project layout"}`,
+        note: `Planning visualization · Verify dimensions and fit on site.${omitted ? ` ${omitted} unaligned placement(s) omitted.` : ""}`,
+      }));
+    } catch {
+      exportRequest.current = undefined;
+      setIsExporting(false);
+      Alert.alert("Layout not shared", "Save failed. Retry Save layout before exporting the image.");
+    }
+  }
+
+  async function handleSnapshotResult(event: { nativeEvent: { requestId: number; uri?: string; error?: string } }) {
+    const result = event.nativeEvent;
+    if (result.requestId !== exportRequest.current) return;
+    try {
+      if (result.error || !result.uri) throw new Error(result.error ?? "No layout image was returned.");
+      await Share.share({ url: result.uri, title: `${project?.name ?? "Project"} layout`, message: "ConstructionAR planning visualization. Verify dimensions and fit on site." });
+    } catch (error) {
+      Alert.alert("Layout image not shared", error instanceof Error ? error.message : "Please retry.");
+    } finally {
+      exportRequest.current = undefined;
+      setIsExporting(false);
+      if (result.uri) void FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => undefined);
+    }
   }
 
   function resetAssembly() {
@@ -264,15 +304,15 @@ export function SavedRoomViewerScreen({ projectId, roomId, mode, onClose }: Save
     <View style={styles.header}><View><Text style={styles.eyebrow}>{mode === "project" ? "ROOM ASSEMBLY" : "SAVED ROOM"}</Text><Text style={styles.title}>{title}</Text></View><Pressable onPress={() => void closeViewer()} style={styles.close}><Text style={styles.closeText}>Close</Text></Pressable></View>
     {!savedRoom3DViewAvailable && <Text style={styles.warning}>The interactive 3D viewer requires the iOS development build. The saved scan data remains intact.</Text>}
     <View style={styles.viewer}>
-    <NativeSavedRoom3DView style={StyleSheet.absoluteFill} objectTransformsJSON={objectTransformsJSON} modelJSON={modelJSON} roomTransformsJSON={transformsJSON} lockedRoomId={lockedRoomId} assemblyMode={mode === "project"} selectedRoomId={selectedRoomId} selectedFeatureIdsJSON={JSON.stringify(mode === "alignment" ? selectedFeatureIdsForNative : selectedObject ? [selectedObject.id] : selectedFeatureIds)} editingRoomId={mode === "alignment" ? roomBId : mode === "project" ? selectedRoomId : undefined} allowDirectManipulation={mode === "alignment" && moveMode} showMeasurements={showMeasurements} resetRequestId={resetRequestId} focusRequestId={focusRequestId} onSceneSelection={handleSelection} onRoomTransformChange={(event) => updateDraftTransform(event.nativeEvent.roomId, event.nativeEvent.transform)} />
+    <NativeSavedRoom3DView snapshotRequestJSON={snapshotRequestJSON} onSnapshotResult={event => { void handleSnapshotResult(event); }} style={StyleSheet.absoluteFill} objectTransformsJSON={objectTransformsJSON} modelJSON={modelJSON} roomTransformsJSON={transformsJSON} lockedRoomId={lockedRoomId} assemblyMode={mode === "project"} selectedRoomId={selectedRoomId} selectedFeatureIdsJSON={JSON.stringify(mode === "alignment" ? selectedFeatureIdsForNative : selectedObject ? [selectedObject.id] : selectedFeatureIds)} editingRoomId={mode === "alignment" ? roomBId : mode === "project" ? selectedRoomId : undefined} allowDirectManipulation={mode === "alignment" && moveMode} showMeasurements={showMeasurements} resetRequestId={resetRequestId} focusRequestId={focusRequestId} onSceneSelection={handleSelection} onRoomTransformChange={(event) => updateDraftTransform(event.nativeEvent.roomId, event.nativeEvent.transform)} />
       {mode !== "alignment" && <>
         <View pointerEvents="none" style={styles.selectionOverlay}><Text style={styles.selectionText}>{selectedCatalogObject ? `${selectedCatalogObject.displayName} · Measurements only` : selectedObject ? `${selectedRoomName} · ${selectedObject.category}` : selectedRoomName}{!selectedObject && selectedRoomId === lockedRoomId ? " · Locked" : ""}{!placementActive && selectedRoomId ? " · Placed" : ""}</Text></View>
-        <PlacementControls enabled={!!canPlace} targetKey={`${selectedRoomId}:${selectedObject?.id ?? "room"}`} precision={step === 0.01} onPrecision={() => setStep(value => value === 0.01 ? 0.1 : 0.01)} onMove={(x, z) => manipulate(x, z)} onRotate={direction => manipulate(0, 0, direction)} onPlace={() => void confirmPlacement()} />
+        <PlacementControls enabled={!!canPlace && !isExporting} targetKey={`${selectedRoomId}:${selectedObject?.id ?? "room"}`} precision={step === 0.01} onPrecision={() => setStep(value => value === 0.01 ? 0.1 : 0.01)} onMove={(x, z) => manipulate(x, z)} onRotate={direction => manipulate(0, 0, direction)} onPlace={() => void confirmPlacement()} />
       </>}
     </View>
     <ControlDrawer expanded={drawerExpanded} onChange={setDrawerExpanded} label="Model controls">
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.toolbar}><Text style={styles.helper}>{mode === "project" ? "Orbit, pan and pinch to inspect. Tap furniture to edit it, or a surface / room name to select a room. Use the joystick to place; camera gestures never move the selection." : "Orbit, pan, and pinch to inspect. Tap a room or feature to select it."}</Text><View style={styles.buttonRow}><Button label="Focus room" disabled={!selectedRoomId} onPress={() => setFocusRequestId(value => value + 1)} /><Button label="Reset view" onPress={() => setResetRequestId((value) => value + 1)} /><Button label={showMeasurements ? "Hide measurements" : "Show measurements"} onPress={() => setShowMeasurements((value) => !value)} /></View></View>
+      <View style={styles.toolbar}><Text style={styles.helper}>{mode === "project" ? "Orbit, pan and pinch to inspect. Tap furniture to edit it, or a surface / room name to select a room. Use the joystick to place; camera gestures never move the selection." : "Orbit, pan, and pinch to inspect. Tap a room or feature to select it."}</Text><View style={styles.buttonRow}><Button label="Focus room" disabled={!selectedRoomId} onPress={() => setFocusRequestId(value => value + 1)} /><Button label={isExporting ? "Preparing image…" : "Share layout image"} disabled={!savedRoom3DViewAvailable || isExporting || !project.roomCaptures.some(room => room.roomScan)} onPress={() => { void shareLayoutImage(); }} /><Button label="Reset view" onPress={() => setResetRequestId((value) => value + 1)} /><Button label={showMeasurements ? "Hide measurements" : "Show measurements"} onPress={() => setShowMeasurements((value) => !value)} /></View></View>
       {mode === "alignment" && <>
         <View style={styles.panel}><Text style={styles.section}>1. Select rooms</Text><RoomChips rooms={project.roomCaptures.filter((room) => room.roomScan)} value={roomAId} onChange={setRoomAId} label="Room A" /><RoomChips rooms={project.roomCaptures.filter((room) => room.roomScan)} value={roomBId} onChange={setRoomBId} label="Room B" /></View>
         <View style={styles.panel}><Text style={styles.section}>2. Select architectural features</Text><FeatureChips label="Room A feature" features={featureList(roomA)} value={featureAId} onChange={setFeatureAId} /><FeatureChips label="Room B feature" features={featureList(roomB)} value={featureBId} onChange={setFeatureBId} /><Button label="Align selected features" onPress={alignSelectedFeatures} /><Text style={styles.helper}>Doors, openings, walls, corners, floors, landings, and stair geometry are eligible. Furniture is never used as an anchor.</Text></View>

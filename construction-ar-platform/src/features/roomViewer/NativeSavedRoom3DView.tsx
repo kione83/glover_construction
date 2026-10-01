@@ -19,6 +19,8 @@ export interface RoomTransformChangeEvent {
 
 interface NativeSavedRoom3DViewProps {
   style?: StyleProp<ViewStyle>;
+  snapshotRequestJSON?: string;
+  onSnapshotResult?: (event: NativeSyntheticEvent<{ requestId: number; uri?: string; error?: string }>) => void;
   modelJSON: string;
   roomTransformsJSON: string;
   objectTransformsJSON: string;

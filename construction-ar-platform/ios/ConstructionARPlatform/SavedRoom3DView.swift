@@ -24,6 +24,56 @@ final class SavedRoom3DView: UIView, UIGestureRecognizerDelegate {
   @objc var onSceneSelection: RCTBubblingEventBlock?
   @objc var onRoomTransformChange: RCTBubblingEventBlock?
 
+  @objc var onSnapshotResult: RCTBubblingEventBlock?
+  @objc var snapshotRequestJSON: String = "" { didSet {
+    guard snapshotRequestJSON != oldValue, !snapshotRequestJSON.isEmpty else { return }
+    let request = snapshotRequestJSON
+    DispatchQueue.main.async { [weak self] in self?.exportSnapshot(request) }
+  } }
+
+  private func exportSnapshot(_ requestJSON: String) {
+    guard let data = requestJSON.data(using: .utf8),
+          let request = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let requestId = request["requestId"] as? NSNumber else { return }
+    guard window != nil, bounds.width > 0, bounds.height > 0, !roomNodes.isEmpty else {
+      onSnapshotResult?(["requestId": requestId, "error": "The saved model is not ready. Wait for it to load and retry."]); return
+    }
+    layoutIfNeeded(); updateAnnotations()
+    let sceneImage = sceneView.snapshot()
+    let footerHeight: CGFloat = 94
+    let format = UIGraphicsImageRendererFormat(); format.scale = min(window?.screen.scale ?? 2, 2); format.opaque = true
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: bounds.width, height: bounds.height + footerHeight), format: format)
+    let output = renderer.image { context in
+      UIColor(red: 0.04, green: 0.07, blue: 0.12, alpha: 1).setFill()
+      context.fill(CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + footerHeight))
+      sceneImage.draw(in: bounds)
+      // SceneKit snapshots omit UIKit overlays. Composite the visible labels and leaders explicitly.
+      for annotation in annotations where !annotation.label.isHidden {
+        if !annotation.leader.isHidden { annotation.leader.render(in: context.cgContext) }
+        context.cgContext.saveGState()
+        context.cgContext.translateBy(x: annotation.label.frame.minX, y: annotation.label.frame.minY)
+        annotation.label.layer.render(in: context.cgContext)
+        context.cgContext.restoreGState()
+      }
+      let title = request["title"] as? String ?? "ConstructionAR layout"
+      let note = request["note"] as? String ?? "Planning visualization · Verify dimensions and fit on site."
+      let date = DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .short)
+      let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
+      (title as NSString).draw(in: CGRect(x: 12, y: bounds.height + 10, width: bounds.width - 24, height: 22), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 15), .foregroundColor: UIColor.white, .paragraphStyle: paragraph])
+      ("ConstructionAR · \(date)\n\(note)" as NSString).draw(in: CGRect(x: 12, y: bounds.height + 35, width: bounds.width - 24, height: 54), withAttributes: [.font: UIFont.systemFont(ofSize: 11), .foregroundColor: UIColor.lightGray])
+    }
+    do {
+      guard let png = output.pngData() else { throw NSError(domain: "ConstructionAR", code: 1) }
+      let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("LayoutExports", isDirectory: true)
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      let url = directory.appendingPathComponent("layout-\(UUID().uuidString).png")
+      try png.write(to: url, options: .atomic)
+      onSnapshotResult?(["requestId": requestId, "uri": url.absoluteString])
+    } catch {
+      onSnapshotResult?(["requestId": requestId, "error": "The layout image could not be saved. Check available storage and retry."])
+    }
+  }
+
   private let sceneView = SCNView()
   private let scene = SCNScene()
   private let contentNode = SCNNode()

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, create, type ReactTestRenderer, type ReactTestInstance } from "react-test-renderer";
-const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), alert: vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), alert: vi.fn(), preview: vi.fn() }));
 vi.mock("react-native", () => ({
   ActivityIndicator: "ActivityIndicator", Image: "Image", KeyboardAvoidingView: "KeyboardAvoidingView", SafeAreaView: "SafeAreaView", ScrollView: "ScrollView", Text: "Text", TextInput: "TextInput", View: "View", Pressable: "Pressable",
+  NativeModules: { ProjectDocumentPreview: { openDocument: mocks.preview } },
   Platform: { OS: "ios" }, StyleSheet: { create: (styles: unknown) => styles, absoluteFill: {} },
   Alert: { alert: mocks.alert }, Share: { share: vi.fn() }, Keyboard: { dismiss: vi.fn() }, LogBox: { ignoreLogs: vi.fn(), ignoreAllLogs: vi.fn() },
 }));
@@ -105,5 +106,26 @@ describe("scan capture recovery", () => {
     expect(renderer.root.findAllByType("NativeRoomScanView" as any)).toHaveLength(0);
     await press("Retry loading project");
     expect(renderer.root.findAllByType("NativeRoomScanView" as any)).toHaveLength(1);
+  });
+});
+
+
+describe("offline plan references", () => {
+  it("opens a saved PDF from project B without changing project selection", async () => {
+    const blueprint = { id: "plan", name: "Kitchen plan.pdf", uri: "file:///documents/plan.pdf", mimeType: "application/pdf", importedAt: "2026-10-01" };
+    documents[1].project.blueprints.push(blueprint);
+    mocks.preview.mockResolvedValue(undefined);
+    await act(async () => { renderer = create(<HomeScreen initialProjectId="B" onProjectChange={() => {}} onOpenMeasure={() => {}} onOpenCamera={() => {}} onOpenStream={() => {}} onOpenRoomScan={() => {}} onOpenRoomViewer={() => {}} />); });
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Open plan Kitchen plan.pdf" }).props.onPress());
+    expect(mocks.preview).toHaveBeenCalledWith(blueprint.uri, blueprint.name);
+    expect(renderer.root.findAll(node => node.props.project?.id === "B").length).toBeGreaterThan(0);
+  });
+
+  it("shows an actionable error when the durable plan file is unavailable", async () => {
+    documents[1].project.blueprints.push({ id: "plan", name: "Missing.pdf", uri: "file:///missing.pdf", mimeType: "application/pdf", importedAt: "2026-10-01" });
+    mocks.preview.mockRejectedValueOnce(new Error("Import this file again."));
+    await act(async () => { renderer = create(<HomeScreen initialProjectId="B" onProjectChange={() => {}} onOpenMeasure={() => {}} onOpenCamera={() => {}} onOpenStream={() => {}} onOpenRoomScan={() => {}} onOpenRoomViewer={() => {}} />); });
+    await act(async () => renderer.root.findByProps({ accessibilityLabel: "Open plan Missing.pdf" }).props.onPress());
+    expect(mocks.alert).toHaveBeenCalledWith("Plan could not be opened", "Import this file again.");
   });
 });

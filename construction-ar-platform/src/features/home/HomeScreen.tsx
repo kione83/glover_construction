@@ -35,6 +35,7 @@ import {
   persistProjectMedia,
   saveProjectDocuments,
 } from "../../storage/projectRepository";
+import { openBlueprint } from "../blueprints/openBlueprint";
 import { colors } from "../../theme/colors";
 import type { SavedRoomViewerMode } from "../roomViewer/SavedRoomViewerScreen";
 
@@ -565,10 +566,11 @@ function BlueprintPanel({ blueprints, onImport }: { blueprints: ProjectBlueprint
     <Text style={styles.helper}>Attach a 2D floor plan or blueprint to keep the planned layout grounded in the project record.</Text>
     {blueprints.length === 0 ? <Text style={styles.empty}>No floor plan imported yet.</Text> : blueprints.map((blueprint) => {
       const isImage = blueprint.mimeType?.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(blueprint.name);
-      return <View key={blueprint.id} style={styles.blueprintRow}>
+      return <Pressable key={blueprint.id} style={styles.blueprintRow} accessibilityRole="button" accessibilityLabel={`Open plan ${blueprint.name}`} onPress={() => { void openBlueprint(blueprint).catch(error => Alert.alert("Plan could not be opened", error instanceof Error ? error.message : "Please retry opening this plan.")); }}>
         {isImage ? <Image source={{ uri: blueprint.uri }} style={styles.blueprintPreview} accessibilityLabel={`${blueprint.name} floor plan`} /> : <View style={styles.documentBadge}><Text style={styles.documentBadgeText}>PDF</Text></View>}
         <View style={styles.blueprintCopy}><Text style={styles.moduleName} numberOfLines={1}>{blueprint.name}</Text><Text style={styles.moduleDescription}>Imported {new Date(blueprint.importedAt).toLocaleDateString()} · {blueprint.mimeType?.split("/").pop()?.toUpperCase() ?? "FILE"}</Text></View>
-      </View>;
+        <Text style={styles.viewButtonText}>Open</Text>
+      </Pressable>;
     })}
   </View>;
 }

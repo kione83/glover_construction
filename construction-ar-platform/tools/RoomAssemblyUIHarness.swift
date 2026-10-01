@@ -10,6 +10,7 @@ import simd
 final class AppDelegate: UIResponder, UIApplicationDelegate {
   var window: UIWindow?
   let viewer = SavedRoom3DView()
+  let preview = ProjectDocumentPreview()
   func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
     let window = UIWindow(frame: UIScreen.main.bounds); self.window = window
     let controller = UIViewController(); controller.view.backgroundColor = .black
@@ -61,6 +62,30 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
       let report = ["result": "PASS", "labels": labels.compactMap(\.text).joined(separator: "\n")]
       let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("result.json")
       try! JSONSerialization.data(withJSONObject: report).write(to: url)
+      self.viewer.onSnapshotResult = { result in
+        precondition(result["error"] == nil, "Snapshot failed: \(result)")
+        let imageURL = URL(string: result["uri"] as! String)!
+        let image = UIImage(contentsOfFile: imageURL.path)!
+        precondition(image.size.height > self.viewer.bounds.height)
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try! Data(contentsOf: imageURL).write(to: documents.appendingPathComponent("layout.png"))
+        let pdfURL = documents.appendingPathComponent("reference.pdf")
+        let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 612, height: 792))
+        try! pdf.writePDF(to: pdfURL) { context in
+          for page in 1...2 {
+            context.beginPage()
+            ("ConstructionAR offline plan reference · Page \(page)" as NSString).draw(at: CGPoint(x: 40, y: 40), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 18)])
+            let outline = UIBezierPath(rect: CGRect(x: 70, y: 100, width: 400, height: 450)); outline.lineWidth = 3; outline.stroke()
+            ("Kitchen / Living · Test reference" as NSString).draw(at: CGPoint(x: 100, y: 300), withAttributes: [.font: UIFont.systemFont(ofSize: 16)])
+          }
+        }
+        self.preview.openDocument("file:///missing-plan.pdf", title: "Missing", resolve: { _ in preconditionFailure("Missing preview must fail") }, reject: { code, _, _ in precondition(code == "preview_missing") })
+        self.preview.openDocument(pdfURL.absoluteString, title: "Kitchen plan", resolve: { _ in
+          let result: [String: Any] = ["result": "PASS", "snapshotWidth": image.size.width, "snapshotHeight": image.size.height, "preview": "opened local two-page PDF", "labels": labels.compactMap(\.text)]
+          try! JSONSerialization.data(withJSONObject: result).write(to: documents.appendingPathComponent("review-result.json"))
+        }, reject: { _, message, _ in preconditionFailure(message ?? "Preview failed") })
+      }
+      self.viewer.snapshotRequestJSON = "{\"requestId\":1,\"title\":\"Kitchen design · Project layout\",\"note\":\"Planning visualization · Verify dimensions and fit on site.\"}"
     }
   }
 }
