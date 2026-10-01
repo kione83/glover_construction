@@ -2,6 +2,26 @@
 
 Review date: September 25, 2026.
 
+## October 1, 2026 implementation update
+
+The September review below is retained as the pre-session assessment. The
+following gaps have since been addressed on `development/2026-10-01-autonomous`:
+
+| Requirement / finding | Session result | Remaining acceptance |
+| --- | --- | --- |
+| FR-6–7, NFR-3: save/reopen reliability | Completed scans retain retryable payloads and stable room IDs; AR edits use an ordered retry queue; close waits for saves; load failures offer recovery. | Retry state is in memory until storage succeeds. Physical-device interruption/background testing remains. |
+| FR-12, NFR-5: project context | Dashboard → AR tools → dashboard retains the selected project. Switching projects clears stale room/measurement selection. | Two-project physical-device acceptance. |
+| FR-14, FR-17, FR-19: placement editing | Saved 3D viewers now move/rotate proposed catalog objects and adjust elevation; canonical poses persist while source AR evidence and scan geometry remain intact. | Touch feel and real-room placement acceptance. |
+| FR-20–23, NFR-8: fit checks | Collision and clearance envelopes use canonical room poses, rotation and scale. Unaligned objects are explicitly unchecked. Missing surface evidence is unverified, not a fabricated attachment failure. | Actual mounting-surface association/orientation, scanned obstacles, and field accuracy are still incomplete. |
+| FR-26, FR-29: visual review outputs | Share current saved-model camera view as a captioned PNG with visible labels and planning caveat; export saves the layout first. | Live composited AR snapshots and richer reports remain future work. |
+| FR-32–33: blueprint reference | Imported PDFs/images open offline in native Quick Look with page navigation and zoom/pan; closing retains project context. | Physical-device gesture/accessibility acceptance. |
+
+The project still lacks rescan-in-place, design duplication/versioning, realistic
+manufacturer assets, and a complete scan → align → place → reopen acceptance run
+on supported hardware. The embedded stream late-viewer negotiation issue remains.
+Advanced collaboration, headsets and multi-trade validation remain post-MVP.
+See `SESSION_2026-10-01.md` for verification evidence and commit references.
+
 ## Assessment
 
 ConstructionAR is a substantial iPhone prototype with real native scanning, saved spatial models, measurement tools, catalog placement, room assembly, and local project documentation. It is not yet a demonstrated, complete MVP against the PRD. The main remaining work is connecting these capabilities reliably, completing blueprint reference and visual sharing, and improving the limited product representations for the residential use case.

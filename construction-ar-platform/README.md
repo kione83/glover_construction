@@ -4,6 +4,30 @@ An Expo/React Native construction-planning prototype with local project data,
 manual layout validation, and a local-development WebRTC live-view proof of
 concept.
 
+## Core project workflow
+
+1. Select or create a project. **Open AR tools** retains that project, including
+   when returning to the dashboard or switching projects within AR tools.
+2. Choose **Scan Room** on a supported LiDAR iPhone. Finish the capture to save
+   it. If storage fails, keep the screen open and use **Retry saving scan**;
+   the completed capture keeps one room identity across retries.
+3. Align AR placement to a saved room, then place catalog objects. Failed AR
+   edits remain queued on the workspace with **Retry saving changes**. Closing
+   waits for pending writes; force-quitting before a retry can lose unsaved work.
+4. Open **View 3D Model** or a room's **View 3D Scan**. Tap a scanned object or
+   proposed catalog object and use the joystick and rotation controls. Proposed
+   objects also expose Raise/Lower controls in **Model controls**. Place/save
+   persists the layout without changing captured dimensions or original AR poses.
+5. In **Model controls**, use **Share layout image** to save the current layout
+   and share a PNG of the current camera view, visible measurement labels, project
+   name, date, and planning caveat. This exports the saved model, not live camera AR.
+
+Validation compares oriented object envelopes in canonical room coordinates.
+Unknown alignment is reported as unchecked, and missing mounting-surface evidence
+is reported as unverified. Moving a proposed object in the saved viewer requires
+its mounting surface to be verified again. Checks are planning aids, not code
+compliance, scanned-obstacle clearance, or survey-grade approval.
+
 ## WebRTC live view (iPhone to laptop)
 
 The iPhone is the WebRTC publisher and uses its rear camera. The laptop runs a
@@ -40,20 +64,23 @@ project. Use the **Field notes** form to record dated observations. Both are
 stored in the local project document and restored when the project is reopened.
 
 Use **Import floor plan / blueprint** to attach an image or PDF reference to the
-selected project. Image plans are previewed in the workspace; PDF plans remain
-available as document references. **Share layout summary** creates a concise
+selected project. Tap **Open** on an imported plan to use the native offline
+PDF/image viewer,
+including PDF page navigation and zoom/pan. Close the preview to return to the
+same project. Preview requires the updated native iOS build.
+**Share layout summary** creates a concise
 handoff containing rooms, placed objects, plan references, validation issues,
 photos, and notes. The summary states that MVP measurements are for planning
 visualization and are not survey-grade.
 
 ## Room Scan
 
-On a supported LiDAR iPhone running iOS 16 or later, choose **Scan Room** in a
+On a supported LiDAR iPhone running iOS 16.4 or later, choose **Scan Room** in a
 project workspace. The native RoomPlan workflow captures individual wall,
 floor, door, window, opening, built-in, furniture, and fixture elements with
 metric dimensions, transforms, semantic categories, confidence, and capture
 time. The resulting `roomScan` is stored on the existing `RoomCapture` inside
-the local project document (schema version 5), so the room can be reconstructed
+the local project document (schema version 8), so the room can be reconstructed
 without scanning again. Irregular rooms remain a collection of transformed
 surfaces rather than being reduced to a rectangle.
 
@@ -105,8 +132,16 @@ fallback for those devices.
 
 ## Verification
 
-Run `npx tsc --noEmit` for TypeScript, `npm test -- --run` for unit tests, and
-the iOS workspace build for the native RoomPlan/ARKit modules.
+Run `npx tsc --noEmit` for TypeScript and `npm test` for domain, storage, and React
+workflow tests. Run `python3 tools/test-room-transforms.py` for native SceneKit
+regressions, and build the iOS workspace for full native integration.
+
+`python3 tools/build-review-ui-harness.py /tmp/construction-review-qa` compiles
+an isolated simulator-only QA app from the production saved viewer and document
+preview code. Install/launch its generated `.app` on a simulator; its Documents
+folder receives `review-result.json` and `layout.png` after successful checks.
+It tests fixture data only. Physical LiDAR capture, alignment stability and touch
+interaction still require device acceptance.
 
 ## Deliberately out of scope
 
