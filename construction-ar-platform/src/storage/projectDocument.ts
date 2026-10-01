@@ -46,6 +46,7 @@ export function createEmptyProjectDocument(
     project: normalizeProjectHierarchy({
       id: overrides.id,
       name: overrides.name,
+      designAlternative: overrides.designAlternative,
       clientName: overrides.clientName,
       siteName: overrides.siteName,
       address: overrides.address,

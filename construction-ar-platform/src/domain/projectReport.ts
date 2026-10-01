@@ -20,6 +20,7 @@ export function buildProjectShareText(project: Project): string {
     "ConstructionAR layout summary",
     "",
     `Project: ${project.name}`,
+    ...(project.designAlternative ? [`Design alternative of: ${project.designAlternative.sourceProjectName} (copied ${formatDate(project.designAlternative.copiedAt)})`] : []),
     `Client: ${project.clientName ?? "Not specified"}`,
     `Site: ${project.siteName ?? "Not specified"}`,
     `Updated: ${formatDate(project.timestamps.updatedAt)}`,

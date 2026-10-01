@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   getInfoAsync: vi.fn(),
   makeDirectoryAsync: vi.fn(),
   copyAsync: vi.fn(),
+  deleteAsync: vi.fn(),
+  readDirectoryAsync: vi.fn(),
   readAsStringAsync: vi.fn(),
   writeAsStringAsync: vi.fn(),
 }));
@@ -18,10 +20,10 @@ vi.mock("expo-file-system/legacy", () => ({
   documentDirectory: "file:///documents/",
   EncodingType: { UTF8: "utf8" },
   copyAsync: mocks.copyAsync,
-  deleteAsync: vi.fn(),
+  deleteAsync: mocks.deleteAsync,
   getInfoAsync: mocks.getInfoAsync,
   makeDirectoryAsync: mocks.makeDirectoryAsync,
-  readDirectoryAsync: vi.fn(),
+  readDirectoryAsync: mocks.readDirectoryAsync,
   readAsStringAsync: mocks.readAsStringAsync,
   writeAsStringAsync: mocks.writeAsStringAsync,
 }));
@@ -30,7 +32,7 @@ import roomsJSON from "../domain/fixtures/threeRoomAssembly.json";
 import { identityTransform, type RoomCapture } from "../domain/projects";
 import { initialAssemblyTransforms, moveAssemblyRoom, rotateAssemblyRoom, saveAssemblyToProject } from "../domain/roomAssembly";
 import { createEmptyProjectDocument } from "./projectDocument";
-import { loadProjectDocuments, persistProjectMedia, saveProjectDocuments } from "./projectRepository";
+import { duplicateProjectDocument, loadProjectDocuments, persistProjectMedia, saveProjectDocuments } from "./projectRepository";
 
 describe("projectRepository", () => {
   beforeEach(() => {
@@ -221,7 +223,104 @@ describe("post-save cleanup", () => {
     const document = createEmptyProjectDocument({ id: "cleanup", name: "Committed project" });
     mocks.asyncStorage.setItem.mockResolvedValueOnce(undefined);
     mocks.getInfoAsync.mockRejectedValueOnce(new Error("Cleanup directory unavailable"));
-    await expect(saveProjectDocuments([document])).resolves.toBeUndefined();
+    await expect(saveProjectDocuments([document])).resolves.toMatchObject([{ project: { id: "cleanup" } }]);
     expect(mocks.asyncStorage.setItem).toHaveBeenCalledOnce();
+  });
+});
+
+describe("independent design alternatives", () => {
+  let stored: string | null;
+  let files: Map<string, string>;
+  beforeEach(() => {
+    vi.resetAllMocks();
+    stored = null;
+    files = new Map();
+    mocks.asyncStorage.getItem.mockImplementation(async () => stored);
+    mocks.asyncStorage.setItem.mockImplementation(async (_key, value) => { stored = value; });
+    mocks.getInfoAsync.mockImplementation(async uri => ({ exists: files.has(uri) }));
+    mocks.readAsStringAsync.mockImplementation(async uri => {
+      if (!files.has(uri)) throw new Error("Missing file");
+      return files.get(uri);
+    });
+    mocks.writeAsStringAsync.mockImplementation(async (uri, value) => { files.set(uri, value); });
+    mocks.copyAsync.mockImplementation(async ({ from, to }) => {
+      if (!files.has(from)) throw new Error("Missing media");
+      files.set(to, files.get(from)!);
+    });
+    mocks.readDirectoryAsync.mockImplementation(async directory => [...new Set([...files.keys()]
+      .filter(uri => uri.startsWith(directory)).map(uri => uri.slice(directory.length).split("/")[0]))]);
+    mocks.deleteAsync.mockImplementation(async uri => { files.delete(uri); });
+  });
+
+  async function saveSource() {
+    const source = createEmptyProjectDocument({ id: "source", name: "Original", roomCaptures: structuredClone(roomsJSON) as RoomCapture[] });
+    source.project.roomCaptures[0].roomScan!.nativeCapturedRoomJSON = "opaque-native-capture";
+    source.project.fieldNotes = [{ id: "note", text: "Keep this", createdAt: "2026-10-01" }];
+    files.set("file:///tmp/photo.jpg", "photo-data");
+    files.set("file:///tmp/plan.pdf", "plan-data");
+    source.project.photos = [{ id: "photo", uri: "file:///tmp/photo.jpg", capturedAt: "2026-10-01" }];
+    source.project.blueprints = [{ id: "plan", name: "Plan.pdf", uri: "file:///tmp/plan.pdf", importedAt: "2026-10-01" }];
+    source.scanMeasurementLogEntries = [{ projectId: "source", roomCaptureId: "room-1", scanId: "native", id: "measurement", history: [] } as any];
+    await saveProjectDocuments([source]);
+    return (await loadProjectDocuments())[0];
+  }
+
+  it("copies archives, media, relationships and measurement ownership and reopens independently", async () => {
+    const original = await saveSource();
+    const sourceArchive = original.project.roomCaptures[0].roomScan!.archiveUri!;
+    const archiveBefore = files.get(sourceArchive);
+    const { documents, projectId } = await duplicateProjectDocument("source", "  Option B  ");
+    const alternative = documents[0];
+    expect(alternative.project.name).toBe("Option B");
+    expect(alternative.project.designAlternative).toMatchObject({ sourceProjectId: "source", sourceProjectName: "Original" });
+    expect(alternative.scanMeasurementLogEntries[0].projectId).toBe(projectId);
+    expect(alternative.project.spatialModel).toEqual(original.project.spatialModel);
+    expect(alternative.project.roomCaptures.map(room => room.id)).toEqual(original.project.roomCaptures.map(room => room.id));
+    expect(alternative.project.roomCaptures[0].roomScan!.archiveUri).not.toBe(sourceArchive);
+    expect(alternative.project.photos[0].uri).not.toBe(original.project.photos[0].uri);
+    expect(alternative.project.blueprints[0].uri).not.toBe(original.project.blueprints[0].uri);
+    expect(files.get(alternative.project.photos[0].uri)).toBe("photo-data");
+    expect(files.get(alternative.project.blueprints[0].uri)).toBe("plan-data");
+    expect(documents[1]).toEqual(original);
+    const reopened = (await loadProjectDocuments({ includeScans: true, projectId }))[0];
+    expect(reopened.project.roomCaptures[0].roomScan!.nativeCapturedRoomJSON).toBe("opaque-native-capture");
+    reopened.project.fieldNotes[0].text = "Alternative change";
+    reopened.project.roomCaptures[0].roomScan!.nativeCapturedRoomJSON = "changed-copy";
+    await saveProjectDocuments([reopened, documents[1]]);
+    expect(files.get(sourceArchive)).toBe(archiveBefore);
+    expect((await loadProjectDocuments())[1].project.fieldNotes[0].text).toBe("Keep this");
+    // Removing the original's scans/media must not remove the alternative's copies.
+    await saveProjectDocuments([reopened]);
+    expect(files.has(sourceArchive)).toBe(false);
+    const [survivor] = await loadProjectDocuments({ includeScans: true });
+    expect(survivor.project.roomCaptures[0].roomScan!.nativeCapturedRoomJSON).toBe("changed-copy");
+    expect(files.get(survivor.project.photos[0].uri)).toBe("photo-data");
+  });
+
+  it("refuses an incomplete copy if an archive is missing and preserves the source index", async () => {
+    const original = await saveSource();
+    const before = stored;
+    files.delete(original.project.roomCaptures[0].roomScan!.archiveUri!);
+    await expect(duplicateProjectDocument("source", "Option B")).rejects.toThrow("complete scan");
+    expect(stored).toBe(before);
+  });
+
+  it("leaves the original intact if a media copy or final index write fails", async () => {
+    await saveSource();
+    const before = stored;
+    mocks.copyAsync.mockRejectedValueOnce(new Error("Disk full"));
+    await expect(duplicateProjectDocument("source", "Option B")).rejects.toThrow("Could not save");
+    expect(stored).toBe(before);
+    mocks.asyncStorage.setItem.mockRejectedValueOnce(new Error("Index full"));
+    await expect(duplicateProjectDocument("source", "Option C")).rejects.toThrow("Could not save");
+    expect(stored).toBe(before);
+    expect((await loadProjectDocuments({ includeScans: true }))[0].project.roomCaptures[0].roomScan!.nativeCapturedRoomJSON).toBe("opaque-native-capture");
+  });
+
+  it("validates the name and source before making a copy", async () => {
+    await expect(duplicateProjectDocument("missing", " ")).rejects.toThrow("between 1 and 120");
+    await expect(duplicateProjectDocument("missing", "x".repeat(121))).rejects.toThrow("between 1 and 120");
+    await expect(duplicateProjectDocument("missing", "Option")).rejects.toThrow("could not be found");
+    expect(mocks.asyncStorage.setItem).not.toHaveBeenCalled();
   });
 });

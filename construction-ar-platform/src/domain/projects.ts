@@ -346,6 +346,8 @@ export interface ProjectBlueprintReference {
 export interface Project {
   id: string;
   name: string;
+  /** Snapshot provenance; alternatives remain independently editable projects. */
+  designAlternative?: { sourceProjectId: string; sourceProjectName: string; copiedAt: string };
   clientName?: string;
   siteName?: string;
   address?: string;

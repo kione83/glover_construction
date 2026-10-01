@@ -59,8 +59,8 @@ function fileExtension(value: string): string {
   return match ? `.${match[1].toLowerCase()}` : "";
 }
 
-function isManagedProjectMediaUri(uri: string): boolean {
-  return Boolean(FileSystem.documentDirectory && uri.startsWith(`${FileSystem.documentDirectory}${PROJECT_MEDIA_DIRECTORY}`));
+function isManagedProjectMediaUri(uri: string, projectId: string): boolean {
+  return Boolean(FileSystem.documentDirectory && uri.startsWith(`${FileSystem.documentDirectory}${PROJECT_MEDIA_DIRECTORY}${encodeURIComponent(projectId)}/`));
 }
 
 /** Copy a project photo or blueprint into Documents and return its stable URI. */
@@ -70,7 +70,7 @@ export async function persistProjectMedia(
   sourceUri: string,
   fileNameHint?: string,
 ): Promise<string> {
-  if (isManagedProjectMediaUri(sourceUri)) return sourceUri;
+  if (isManagedProjectMediaUri(sourceUri, projectId)) return sourceUri;
 
   const directory = await ensureProjectMediaDirectory(projectId);
   const extension = fileExtension(fileNameHint ?? sourceUri);
@@ -158,7 +158,7 @@ export async function loadProjectDocuments(options: LoadProjectDocumentsOptions 
   }
 }
 
-export async function saveProjectDocuments(documents: ProjectDocument[]): Promise<void> {
+export async function saveProjectDocuments(documents: ProjectDocument[]): Promise<ProjectDocument[]> {
   try {
     const preparedDocuments = await Promise.all(documents.map(async (document) => {
       const project = await persistProjectMediaReferences(normalizeProjectHierarchy(document.project));
@@ -178,6 +178,7 @@ export async function saveProjectDocuments(documents: ProjectDocument[]): Promis
     await AsyncStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(preparedDocuments));
     await removeOrphanedScanArchives(preparedDocuments);
     await removeOrphanedProjectMedia(preparedDocuments);
+    return preparedDocuments;
   } catch (error) {
     if (error instanceof ProjectStorageError) throw error;
     throw new ProjectStorageError("Could not save project data or its attached files.");
@@ -240,6 +241,49 @@ async function removeOrphanedProjectMedia(documents: ProjectDocument[]): Promise
 export async function loadProjectScan(projectId: string, roomId: string) {
   const documents = await loadProjectDocuments({ includeScans: true, projectId, roomIds: [roomId] });
   return documents.find((document) => document.project.id === projectId)?.project.roomCaptures.find((room) => room.id === roomId)?.roomScan;
+}
+
+/** Copy a complete design, including independent durable media and scan archives. */
+export async function duplicateProjectDocument(sourceProjectId: string, name: string): Promise<{ documents: ProjectDocument[]; projectId: string }> {
+  const trimmedName = name.trim();
+  if (!trimmedName || trimmedName.length > 120) {
+    throw new ProjectStorageError("Enter an alternative name between 1 and 120 characters.");
+  }
+  const documents = await loadProjectDocuments();
+  const source = documents.find(document => document.project.id === sourceProjectId);
+  if (!source) throw new ProjectStorageError("The source project could not be found. Reopen the project and try again.");
+  const projectId = `project-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  if (documents.some(document => document.project.id === projectId)) {
+    throw new ProjectStorageError("Could not create a unique alternative. Please retry.");
+  }
+  // All child identifiers are scoped to the project. Keeping them preserves room,
+  // assembly, anchor and measurement relationships without modifying native IDs.
+  const copy: ProjectDocument = JSON.parse(JSON.stringify(source));
+  const now = new Date().toISOString();
+  copy.project.id = projectId;
+  copy.project.name = trimmedName;
+  copy.project.timestamps = { createdAt: now, updatedAt: now };
+  copy.project.designAlternative = { sourceProjectId, sourceProjectName: source.project.name, copiedAt: now };
+  copy.scanMeasurementLogEntries = copy.scanMeasurementLogEntries.map(entry => ({ ...entry, projectId }));
+  for (const room of copy.project.roomCaptures) {
+    if (!room.roomScan) continue;
+    const scan = room.roomScan;
+    if (scan.archiveUri) {
+      try {
+        const archived = JSON.parse(await FileSystem.readAsStringAsync(scan.archiveUri));
+        if (archived?.portal?.format !== "construction-ar-room-scan" || !Array.isArray(archived.elements)) throw new Error("Invalid archive");
+        // The index owns current object edits; the archive owns the heavy payload.
+        room.roomScan = { ...archived, ...scan };
+      } catch {
+        throw new ProjectStorageError(`The complete scan for ${room.name} could not be copied. The original project is unchanged; restore its scan file and retry.`);
+      }
+    }
+    delete room.roomScan!.archiveUri;
+    delete room.roomScan!.archiveSizeBytes;
+  }
+  const savedDocuments = await saveProjectDocuments([copy, ...documents]);
+  // Return persisted URIs, never the source's media/archive paths.
+  return { documents: savedDocuments, projectId };
 }
 
 export function replaceProject(documents: ProjectDocument[], updatedProject: Project): ProjectDocument[] {

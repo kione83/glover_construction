@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, create, type ReactTestRenderer, type ReactTestInstance } from "react-test-renderer";
-const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), alert: vi.fn(), preview: vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), alert: vi.fn(), preview: vi.fn(), duplicate: vi.fn() }));
 vi.mock("react-native", () => ({
   ActivityIndicator: "ActivityIndicator", Image: "Image", KeyboardAvoidingView: "KeyboardAvoidingView", SafeAreaView: "SafeAreaView", ScrollView: "ScrollView", Text: "Text", TextInput: "TextInput", View: "View", Pressable: "Pressable",
   NativeModules: { ProjectDocumentPreview: { openDocument: mocks.preview } },
@@ -9,7 +9,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("expo-file-system/legacy", () => ({}));
 vi.mock("expo-document-picker", () => ({}));
-vi.mock("../storage/projectRepository", () => ({ loadProjectDocuments: mocks.load, saveProjectDocuments: mocks.save, loadProjectScan: vi.fn(), persistProjectMedia: vi.fn(), replaceProjectDocument: (documents: any[], document: any) => documents.map(item => item.project.id === document.project.id ? document : item) }));
+vi.mock("../storage/projectRepository", () => ({ loadProjectDocuments: mocks.load, duplicateProjectDocument: mocks.duplicate, saveProjectDocuments: mocks.save, loadProjectScan: vi.fn(), persistProjectMedia: vi.fn(), replaceProjectDocument: (documents: any[], document: any) => documents.map(item => item.project.id === document.project.id ? document : item) }));
 vi.mock("../features/camera/LiveCameraScreen", () => ({ LiveCameraScreen: "LiveCameraScreen" }));
 vi.mock("../features/camera/LiveWebRtcPublisherScreen", () => ({ LiveWebRtcPublisherScreen: "LiveWebRtcPublisherScreen" }));
 vi.mock("../features/camera/LiveStreamPanel", () => ({ LiveStreamPanel: "LiveStreamPanel" }));
@@ -169,5 +169,45 @@ describe("AR workspace loading", () => {
     expect(renderer.root.findAllByType("NativeMeasurementARView" as any)).toHaveLength(0);
     await press("Retry loading projects");
     expect(renderer.root.findAllByType("NativeMeasurementARView" as any)).toHaveLength(1);
+  });
+});
+
+describe("design alternative workflow", () => {
+  async function openHome() {
+    const change = vi.fn();
+    await act(async () => { renderer = create(<HomeScreen initialProjectId="B" onProjectChange={change} onOpenMeasure={() => {}} onOpenCamera={() => {}} onOpenStream={() => {}} onOpenRoomScan={() => {}} onOpenRoomViewer={() => {}} />); });
+    await press("Duplicate as design alternative");
+    return change;
+  }
+  it("duplicates the selected project and switches to the saved alternative", async () => {
+    const change = await openHome();
+    const alternative = createEmptyProjectDocument({ id: "copy", name: "Project B - alternative" });
+    mocks.duplicate.mockResolvedValueOnce({ documents: [alternative, ...documents], projectId: "copy" });
+    await press("Create alternative");
+    expect(mocks.duplicate).toHaveBeenCalledWith("B", "Project B - alternative");
+    expect(change).toHaveBeenLastCalledWith("copy");
+    expect(renderer.root.findAll(node => node.props.project?.id === "copy")).not.toHaveLength(0);
+    expect(text(renderer.root)).toContain("You are now editing this independent alternative");
+  });
+  it("retains the chosen name and source after failure for retry", async () => {
+    const change = await openHome();
+    const input = renderer.root.findByProps({ placeholder: "Alternative name" });
+    await act(async () => input.props.onChangeText("Kitchen option two"));
+    mocks.duplicate.mockRejectedValueOnce(new Error("Scan archive unavailable"));
+    await press("Create alternative");
+    expect(change).toHaveBeenLastCalledWith("B");
+    expect(renderer.root.findByProps({ placeholder: "Alternative name" }).props.value).toBe("Kitchen option two");
+    expect(mocks.alert).toHaveBeenCalledWith("Project storage unavailable", "Scan archive unavailable");
+    expect(button("Create alternative")).toBeDefined();
+  });
+  it("shows copying progress and prevents a second submission or navigation while saving", async () => {
+    await openHome();
+    let finish!: (value: any) => void;
+    mocks.duplicate.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await act(async () => { button("Create alternative").props.onPress(); });
+    expect(text(renderer.root)).toContain("Copying the complete design");
+    expect(renderer.root.findAllByType("Pressable" as any)).toHaveLength(0);
+    await act(async () => finish({ documents, projectId: "B" }));
+    expect(mocks.duplicate).toHaveBeenCalledOnce();
   });
 });

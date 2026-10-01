@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import {
@@ -32,6 +32,7 @@ import { validateProject } from "../../domain/validationService";
 import { createEmptyProjectDocument, updateProjectSummary } from "../../storage/projectDocument";
 import {
   loadProjectDocuments,
+  duplicateProjectDocument,
   persistProjectMedia,
   saveProjectDocuments,
 } from "../../storage/projectRepository";
@@ -61,6 +62,11 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
   const [selectedCatalogObjectId, setSelectedCatalogObjectId] = useState<string>();
   const [fieldNoteText, setFieldNoteText] = useState("");
   const [storageError, setStorageError] = useState<string>();
+  const [alternativeName, setAlternativeName] = useState("");
+  const [isNamingAlternative, setIsNamingAlternative] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const duplicatingRef = useRef(false);
+  const [alternativeNotice, setAlternativeNotice] = useState<string>();
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
@@ -145,6 +151,26 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
     setClientName("");
     setSiteName("");
     setIsCreating(false);
+  }
+
+  async function createAlternative() {
+    if (!selectedProject || duplicatingRef.current) return;
+    duplicatingRef.current = true;
+    setIsDuplicating(true);
+    try {
+      const result = await duplicateProjectDocument(selectedProject.id, alternativeName);
+      setProjects(result.documents.map(document => document.project));
+      setSelectedProjectId(result.projectId);
+      onProjectChange(result.projectId);
+      setIsNamingAlternative(false);
+      setStorageError(undefined);
+      setAlternativeNotice(`Created ${alternativeName.trim()}. You are now editing this independent alternative.`);
+    } catch (error) {
+      reportStorageError(error);
+    } finally {
+      duplicatingRef.current = false;
+      setIsDuplicating(false);
+    }
   }
 
   async function updateSelectedProject(update: (project: Project) => Project) {
@@ -491,6 +517,10 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
     return <ActivityIndicator color={colors.accent} size="large" />;
   }
 
+  if (isDuplicating) {
+    return <View style={styles.form} accessibilityLiveRegion="polite"><ActivityIndicator color={colors.accent} size="large" /><Text style={styles.helper}>Copying the complete design, scans, photos and plans. Keep the app open until the alternative is saved.</Text></View>;
+  }
+
   return (
     <View style={styles.screen}>
       <View style={styles.hero}>
@@ -516,13 +546,25 @@ export function HomeScreen({ initialProjectId, onProjectChange, onOpenCamera, on
         <View style={styles.moduleList}>
           {projects.length === 0 && <Text style={styles.empty}>No projects yet.</Text>}
           {projects.map((project) => (
-            <Pressable key={project.id} onPress={() => { setSelectedProjectId(project.id); onProjectChange(project.id); }} style={[styles.moduleCard, project.id === selectedProjectId && styles.selectedCard]}>
+            <Pressable key={project.id} onPress={() => { setSelectedProjectId(project.id); onProjectChange(project.id); setIsNamingAlternative(false); setAlternativeNotice(undefined); }} style={[styles.moduleCard, project.id === selectedProjectId && styles.selectedCard]}>
               <Text style={styles.moduleName}>{project.name}</Text>
               <Text style={styles.moduleDescription}>{project.clientName ?? "No client"} · {project.siteName ?? "No site"}</Text>
+              {project.designAlternative && <Text style={styles.moduleDescription}>Alternative of {project.designAlternative.sourceProjectName}</Text>}
             </Pressable>
           ))}
         </View>
       </View>
+
+      {selectedProject && <View style={styles.form}>
+        <Text style={styles.sectionLabel}>Design alternatives</Text>
+        <Text style={styles.helper}>Save an independent copy of this project to explore another layout, including its scans, placements, measurements, notes, photos and plans.</Text>
+        {alternativeNotice && <Text accessibilityLiveRegion="polite" style={styles.success}>{alternativeNotice}</Text>}
+        {isNamingAlternative ? <>
+          <Field label="Alternative name" value={alternativeName} onChangeText={setAlternativeName} />
+          <Button label="Create alternative" onPress={() => void createAlternative()} />
+          <Button label="Cancel alternative" onPress={() => setIsNamingAlternative(false)} />
+        </> : <Button label="Duplicate as design alternative" onPress={() => { setAlternativeName(`${selectedProject.name} - alternative`.slice(0, 120)); setAlternativeNotice(undefined); setIsNamingAlternative(true); }} />}
+      </View>}
 
       {selectedProject && <ProjectDashboard project={selectedProject} roomName={roomName} onRoomNameChange={setRoomName} onAddRoom={() => void addManualRoom()} onDeleteRoom={deleteRoom} onDeleteAllScans={deleteAllScans} onDeleteAllScansEverywhere={deleteAllScansEverywhere} onSaveRoomConnection={saveRoomConnection} onOpenRoomViewer={onOpenRoomViewer} selectedCatalogObjectId={selectedCatalogObjectId} onSelectCatalogObject={setSelectedCatalogObjectId} onPlaceObject={(item: any) => void placeCatalogObject(item)} onRunValidation={() => void runValidation()} onOpenCamera={() => onOpenCamera((uri) => void addProjectPhoto(uri), clearSelectedRoomPlacements)} onOpenStream={() => onOpenStream(clearSelectedRoomPlacements)} onClearPlacements={clearSelectedRoomPlacements} onOpenMeasure={(catalogObjectId?: string) => onOpenMeasure(selectedProject.id, catalogObjectId)} onOpenRoomScan={() => onOpenRoomScan(selectedProject.id)} fieldNoteText={fieldNoteText} onFieldNoteTextChange={setFieldNoteText} onAddFieldNote={() => void addFieldNote()} onImportBlueprint={() => void importBlueprint()} onShareProjectSummary={() => void shareProjectSummary()} />}
     </View>
